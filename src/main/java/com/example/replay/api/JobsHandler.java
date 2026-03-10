@@ -20,9 +20,12 @@ import java.util.concurrent.TimeUnit;
  * Handler for the replay-jobs REST resource.
  *
  * <pre>
- *   POST   /api/v1/replay/jobs       → {@link #create}
- *   GET    /api/v1/replay/jobs       → {@link #list}
- *   GET    /api/v1/replay/jobs/{id}  → {@link #getById}
+ *   POST    /api/v1/replay/jobs            → {@link #create}
+ *   GET     /api/v1/replay/jobs            → {@link #list}
+ *   GET     /api/v1/replay/jobs/{id}       → {@link #getById}
+ *   POST    /api/v1/replay/jobs/{id}/pause → {@link #pause}
+ *   POST    /api/v1/replay/jobs/{id}/resume→ {@link #resume}
+ *   DELETE  /api/v1/replay/jobs/{id}       → {@link #cancel}
  * </pre>
  *
  * Handlers are plain {@code Function<HttpRequest, HttpResponse>} so they plug
@@ -161,8 +164,100 @@ public final class JobsHandler {
     }
 
     // -----------------------------------------------------------------------
+    // POST /api/v1/replay/jobs/{id}/pause
+    // -----------------------------------------------------------------------
+
+    /**
+     * Pauses a running replay job.
+     *
+     * <p>Responses:
+     * <ul>
+     *   <li>{@code 200 OK} — {@link ReplayJob} in PAUSED state</li>
+     *   <li>{@code 404 Not Found} — unknown job ID</li>
+     *   <li>{@code 422 Unprocessable Entity} — job not in RUNNING state</li>
+     * </ul>
+     */
+    public HttpResponse pause(HttpRequest req) {
+        return lifecycle(req, replyTo ->
+                new Messages.CoordinatorCommand.PauseJob(req.pathParam("id"), replyTo));
+    }
+
+    // -----------------------------------------------------------------------
+    // POST /api/v1/replay/jobs/{id}/resume
+    // -----------------------------------------------------------------------
+
+    /**
+     * Resumes a paused replay job.
+     *
+     * <p>Responses:
+     * <ul>
+     *   <li>{@code 200 OK} — {@link ReplayJob} in RUNNING state</li>
+     *   <li>{@code 404 Not Found} — unknown job ID</li>
+     *   <li>{@code 422 Unprocessable Entity} — job not in PAUSED state</li>
+     * </ul>
+     */
+    public HttpResponse resume(HttpRequest req) {
+        return lifecycle(req, replyTo ->
+                new Messages.CoordinatorCommand.ResumeJob(req.pathParam("id"), replyTo));
+    }
+
+    // -----------------------------------------------------------------------
+    // DELETE /api/v1/replay/jobs/{id}
+    // -----------------------------------------------------------------------
+
+    /**
+     * Cancels a replay job (any status).
+     *
+     * <p>Responses:
+     * <ul>
+     *   <li>{@code 200 OK} — {@link ReplayJob} in CANCELLED state</li>
+     *   <li>{@code 404 Not Found} — unknown job ID</li>
+     * </ul>
+     */
+    public HttpResponse cancel(HttpRequest req) {
+        return lifecycle(req, replyTo ->
+                new Messages.CoordinatorCommand.CancelJob(req.pathParam("id"), replyTo));
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    /**
+     * Generic lifecycle-command dispatcher: builds the command with the
+     * provided factory, asks the coordinator, maps the response to HTTP.
+     */
+    private HttpResponse lifecycle(
+            HttpRequest req,
+            java.util.function.Function<
+                    org.apache.pekko.actor.typed.ActorRef<Messages.CoordinatorResponse>,
+                    Messages.CoordinatorCommand> cmdFactory) {
+        try {
+            Messages.CoordinatorResponse response = AskPattern
+                    .<Messages.CoordinatorCommand, Messages.CoordinatorResponse>ask(
+                            system,
+                            cmdFactory::apply,
+                            TIMEOUT,
+                            system.scheduler())
+                    .toCompletableFuture()
+                    .get(TIMEOUT.toSeconds() + 1, TimeUnit.SECONDS);
+
+            return switch (response) {
+                case Messages.CoordinatorResponse.JobAccepted  a -> HttpResponse.ok(JsonUtils.toJson(a.job()));
+                case Messages.CoordinatorResponse.JobSnapshot  s -> HttpResponse.ok(JsonUtils.toJson(s.job()));
+                case Messages.CoordinatorResponse.JobPaused    p -> HttpResponse.ok(JsonUtils.toJson(p.job()));
+                case Messages.CoordinatorResponse.JobResumed   r -> HttpResponse.ok(JsonUtils.toJson(r.job()));
+                case Messages.CoordinatorResponse.JobNotFound  n ->
+                        HttpResponse.notFound("/api/v1/replay/jobs/" + n.jobId());
+                case Messages.CoordinatorResponse.Rejected     r ->
+                        unprocessable(List.of(new ValidationError("job", r.reason())));
+                default -> HttpResponse.internalError("unexpected coordinator response");
+            };
+        } catch (Exception e) {
+            log.error("Lifecycle command failed", e);
+            return HttpResponse.internalError(e.getMessage());
+        }
+    }
 
     private static HttpResponse unprocessable(List<ValidationError> errors) {
         var body = "{\"errors\":" + JsonUtils.toJson(errors) + "}";

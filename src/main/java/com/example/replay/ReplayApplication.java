@@ -1,7 +1,7 @@
 package com.example.replay;
 
+import com.example.replay.actors.JobManager;
 import com.example.replay.actors.Messages;
-import com.example.replay.actors.ReplayCoordinator;
 import com.example.replay.api.JobsHandler;
 import com.example.replay.rest.HttpResponse;
 import com.example.replay.rest.MinimalHttpServer;
@@ -52,7 +52,7 @@ public final class ReplayApplication {
 
         // --- Pekko actor system ------------------------------------------------
         ActorSystem<Messages.CoordinatorCommand> system =
-                ActorSystem.create(ReplayCoordinator.create(repo), "replay-system");
+                ActorSystem.create(JobManager.create(repo), "replay-system");
 
         // --- Route handlers ----------------------------------------------------
         var jobsHandler = new JobsHandler(system, repo);
@@ -61,9 +61,12 @@ public final class ReplayApplication {
         var http = new MinimalHttpServer(port)
                 .get("/health", req -> HttpResponse.ok(
                         "{\"status\":\"OK\",\"timestamp\":\"%s\"}".formatted(Instant.now())))
-                .post("/api/v1/replay/jobs",        jobsHandler::create)
-                .get("/api/v1/replay/jobs",         jobsHandler::list)
-                .get("/api/v1/replay/jobs/{id}",    jobsHandler::getById);
+                .post("/api/v1/replay/jobs",              jobsHandler::create)
+                .get("/api/v1/replay/jobs",               jobsHandler::list)
+                .get("/api/v1/replay/jobs/{id}",          jobsHandler::getById)
+                .post("/api/v1/replay/jobs/{id}/pause",   jobsHandler::pause)
+                .post("/api/v1/replay/jobs/{id}/resume",  jobsHandler::resume)
+                .delete("/api/v1/replay/jobs/{id}",       jobsHandler::cancel);
 
         http.start();
 
