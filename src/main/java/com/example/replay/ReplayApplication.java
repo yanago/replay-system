@@ -1,6 +1,8 @@
 package com.example.replay;
 
+import com.example.replay.actors.Messages;
 import com.example.replay.actors.ReplayCoordinator;
+import com.example.replay.api.JobsHandler;
 import com.example.replay.rest.HttpResponse;
 import com.example.replay.rest.MinimalHttpServer;
 import org.apache.pekko.actor.typed.ActorSystem;
@@ -32,16 +34,17 @@ public final class ReplayApplication {
         log.info("Starting Replay System …");
 
         // --- Pekko actor system ------------------------------------------------
-        var system = ActorSystem.create(ReplayCoordinator.create(), "replay-system");
+        ActorSystem<Messages.CoordinatorCommand> system =
+                ActorSystem.create(ReplayCoordinator.create(), "replay-system");
+
+        // --- Route handlers ----------------------------------------------------
+        var jobsHandler = new JobsHandler(system);
 
         // --- HTTP server -------------------------------------------------------
         var http = new MinimalHttpServer(port)
-                .get("/health", req -> {
-                    var body = """
-                            {"status":"OK","timestamp":"%s"}""".formatted(Instant.now());
-                    return HttpResponse.ok(body);
-                });
-        // Additional routes (replay CRUD) will be registered in subsequent features.
+                .get("/health", req -> HttpResponse.ok(
+                        "{\"status\":\"OK\",\"timestamp\":\"%s\"}".formatted(Instant.now())))
+                .post("/api/v1/replay/jobs", jobsHandler::create);
 
         http.start();
 

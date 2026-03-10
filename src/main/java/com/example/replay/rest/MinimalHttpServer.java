@@ -94,7 +94,7 @@ public final class MinimalHttpServer {
         executor = Executors.newVirtualThreadPerTaskExecutor();
         running  = true;
         executor.submit(this::acceptLoop);
-        log.info("MinimalHttpServer listening on port {}", port);
+        log.info("MinimalHttpServer listening on port {}", serverSocket.getLocalPort());
     }
 
     /** Stops accepting new connections and awaits in-flight request completion. */
@@ -105,7 +105,13 @@ public final class MinimalHttpServer {
         log.info("MinimalHttpServer stopped");
     }
 
+    /** Configured port (may be 0 for OS-assigned). */
     public int port() { return port; }
+
+    /** Actual bound port — differs from {@link #port()} when 0 was requested. */
+    public int boundPort() {
+        return serverSocket != null ? serverSocket.getLocalPort() : port;
+    }
 
     // -----------------------------------------------------------------------
     // Connection handling
