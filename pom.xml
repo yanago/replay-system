@@ -267,8 +267,7 @@
                 <version>3.13.0</version>
                 <configuration>
                     <release>${java.version}</release>
-                    <!-- Enable preview features if needed (e.g. pattern matching for switch) -->
-                    <!-- <compilerArgs><arg>--enable-preview</arg></compilerArgs> -->
+                    <!-- Uncomment to enable preview features: compilerArgs / arg = enable-preview -->
                 </configuration>
             </plugin>
 
