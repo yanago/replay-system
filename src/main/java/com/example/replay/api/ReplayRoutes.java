@@ -11,6 +11,7 @@ import org.apache.pekko.actor.typed.javadsl.AskPattern;
 import org.apache.pekko.http.javadsl.marshallers.jackson.Jackson;
 import org.apache.pekko.http.javadsl.model.StatusCodes;
 import org.apache.pekko.http.javadsl.server.AllDirectives;
+import org.apache.pekko.http.javadsl.server.PathMatchers;
 import org.apache.pekko.http.javadsl.server.Route;
 
 import java.time.Duration;
@@ -21,11 +22,14 @@ import java.util.concurrent.CompletionStage;
  * Pekko HTTP route definitions for the replay REST API.
  *
  * <pre>
- *   POST   /replay          – submit a new replay job
- *   GET    /replay          – list all jobs
- *   GET    /replay/{jobId}  – get job status
- *   DELETE /replay/{jobId}  – cancel a job
+ *   POST   /replay              – submit a new replay job
+ *   GET    /replay              – list all jobs
+ *   GET    /replay/{jobId}      – get job status
+ *   DELETE /replay/{jobId}      – cancel a job
  * </pre>
+ *
+ * Variable path segments are matched with {@code remaining()} — the standard
+ * Pekko HTTP Java DSL method for capturing the rest of the matched path.
  */
 public final class ReplayRoutes extends AllDirectives {
 
@@ -46,7 +50,8 @@ public final class ReplayRoutes extends AllDirectives {
                                 post(this::submitJob),
                                 get(this::listJobs)
                         )),
-                        path(segment(), jobId -> concat(
+                        // PathMatchers.segment() captures a single URL path segment as String
+                        path(PathMatchers.segment(), jobId -> concat(
                                 get(()    -> getJob(jobId)),
                                 delete(() -> cancelJob(jobId))
                         ))
@@ -109,7 +114,7 @@ public final class ReplayRoutes extends AllDirectives {
         return onSuccess(reply, response -> switch (response) {
             case CoordinatorResponse.JobSnapshot snap ->
                     complete(StatusCodes.OK, snap.job(), Jackson.marshaller(JsonUtils.MAPPER));
-            case CoordinatorResponse.JobNotFound _ ->
+            case CoordinatorResponse.JobNotFound notFound ->
                     complete(StatusCodes.NOT_FOUND, "Job not found: " + jobId);
             default -> complete(StatusCodes.INTERNAL_SERVER_ERROR, "Unexpected response");
         });
@@ -125,7 +130,7 @@ public final class ReplayRoutes extends AllDirectives {
         return onSuccess(reply, response -> switch (response) {
             case CoordinatorResponse.JobSnapshot snap ->
                     complete(StatusCodes.OK, snap.job(), Jackson.marshaller(JsonUtils.MAPPER));
-            case CoordinatorResponse.JobNotFound _ ->
+            case CoordinatorResponse.JobNotFound notFound ->
                     complete(StatusCodes.NOT_FOUND, "Job not found: " + jobId);
             default -> complete(StatusCodes.INTERNAL_SERVER_ERROR, "Unexpected response");
         });

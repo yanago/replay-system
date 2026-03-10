@@ -62,7 +62,7 @@ public final class KafkaEventPublisher implements EventPublisher {
                 .toArray(CompletableFuture[]::new);
 
         return CompletableFuture.allOf(futures)
-                .thenApply(_ -> sent.get());
+                .thenApply(ignored -> sent.get());
     }
 
     @Override

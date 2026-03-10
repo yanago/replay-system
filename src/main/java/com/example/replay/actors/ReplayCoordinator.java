@@ -4,6 +4,7 @@ import com.example.replay.actors.Messages.CoordinatorCommand;
 import com.example.replay.actors.Messages.CoordinatorResponse;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.model.ReplayStatus;
+import org.apache.pekko.actor.typed.ActorRef;
 import org.apache.pekko.actor.typed.Behavior;
 import org.apache.pekko.actor.typed.javadsl.AbstractBehavior;
 import org.apache.pekko.actor.typed.javadsl.ActorContext;
@@ -22,7 +23,9 @@ public final class ReplayCoordinator
         extends AbstractBehavior<Messages.CoordinatorCommand> {
 
     // In-memory job registry; persistence is delegated to the repository layer
-    private final Map<String, ReplayJob> jobs = new HashMap<>();
+    private final Map<String, ReplayJob>                        jobs    = new HashMap<>();
+    // Worker refs kept separately so cancel can send directly without a getChild() cast
+    private final Map<String, ActorRef<Messages.WorkerCommand>> workers = new HashMap<>();
 
     // -----------------------------------------------------------------------
     // Factory
@@ -60,11 +63,12 @@ public final class ReplayCoordinator
         var job = msg.job().withStatus(ReplayStatus.RUNNING);
         jobs.put(job.jobId(), job);
 
-        // Spawn a dedicated worker actor for this job
+        // Spawn a dedicated worker actor for this job; keep the typed ref for later cancellation
         var workerRef = getContext().spawn(
                 ReplayWorker.create(getContext().getSelf()),
                 "worker-" + job.jobId()
         );
+        workers.put(job.jobId(), workerRef);
         workerRef.tell(new Messages.WorkerCommand.Start(job));
 
         getContext().getLog().info("Job {} submitted, worker spawned", job.jobId());
@@ -78,12 +82,9 @@ public final class ReplayCoordinator
             msg.replyTo().tell(new CoordinatorResponse.JobNotFound(msg.jobId()));
             return this;
         }
-        // Signal worker to stop
-        getContext().getChild("worker-" + msg.jobId()).ifPresent(ref -> {
-            @SuppressWarnings("unchecked")
-            var worker = (org.apache.pekko.actor.typed.ActorRef<Messages.WorkerCommand>) ref;
-            worker.tell(new Messages.WorkerCommand.Cancel());
-        });
+        // Signal worker to stop via the typed ref we kept at spawn time
+        var workerRef = workers.remove(msg.jobId());
+        if (workerRef != null) workerRef.tell(new Messages.WorkerCommand.Cancel());
         var cancelled = job.withStatus(ReplayStatus.CANCELLED);
         jobs.put(msg.jobId(), cancelled);
         msg.replyTo().tell(new CoordinatorResponse.JobSnapshot(cancelled));

@@ -1,10 +1,13 @@
 package com.example.replay;
 
 import com.example.replay.actors.ReplayCoordinator;
-import com.example.replay.rest.HttpServer;
+import com.example.replay.rest.HttpResponse;
+import com.example.replay.rest.MinimalHttpServer;
 import org.apache.pekko.actor.typed.ActorSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Instant;
 
 /**
  * Application entry point.
@@ -12,8 +15,8 @@ import org.slf4j.LoggerFactory;
  * <p>Bootstrap order:
  * <ol>
  *   <li>Read config from env / system properties.</li>
+ *   <li>Start the {@link MinimalHttpServer} with all API routes registered.</li>
  *   <li>Spin up the Pekko {@link ActorSystem} with {@link ReplayCoordinator} as the guardian.</li>
- *   <li>Start the Pekko HTTP REST server.</li>
  * </ol>
  *
  * <p>All wiring (DataSource, Iceberg catalog, Kafka producer) is done here so
@@ -23,27 +26,32 @@ public final class ReplayApplication {
 
     private static final Logger log = LoggerFactory.getLogger(ReplayApplication.class);
 
-    public static void main(String[] args) {
-        var host = System.getenv().getOrDefault("HTTP_HOST", "0.0.0.0");
-        var port = Integer.parseInt(System.getenv().getOrDefault("HTTP_PORT", "8080"));
+    public static void main(String[] args) throws Exception {
+        int port = Integer.parseInt(System.getenv().getOrDefault("HTTP_PORT", "8080"));
 
         log.info("Starting Replay System …");
 
-        // Guardian actor == the coordinator; the actor system name is used in
-        // Pekko remoting and logging — keep it stable.
+        // --- Pekko actor system ------------------------------------------------
         var system = ActorSystem.create(ReplayCoordinator.create(), "replay-system");
 
-        var coordinator = system; // ActorSystem<CoordinatorCommand> IS the guardian ref
+        // --- HTTP server -------------------------------------------------------
+        var http = new MinimalHttpServer(port)
+                .get("/health", req -> {
+                    var body = """
+                            {"status":"OK","timestamp":"%s"}""".formatted(Instant.now());
+                    return HttpResponse.ok(body);
+                });
+        // Additional routes (replay CRUD) will be registered in subsequent features.
 
-        var httpServer = new HttpServer(host, port, system, coordinator);
-        httpServer.start();
+        http.start();
 
-        // JVM shutdown hook — terminate the actor system cleanly
+        // --- Shutdown hook -----------------------------------------------------
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            log.info("Shutdown signal received — terminating actor system");
+            log.info("Shutdown signal received");
+            http.stop();
             system.terminate();
         }, "shutdown-hook"));
 
-        log.info("Replay System started on {}:{}", host, port);
+        log.info("Replay System online — http://0.0.0.0:{}/", port);
     }
 }
