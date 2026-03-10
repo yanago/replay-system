@@ -1,32 +1,41 @@
 package com.example.replay.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.time.Instant;
 
 /**
- * Represents a replay request: a time-bounded slice of events from the data
- * lake to be published to a Kafka topic at a configurable speed multiplier.
+ * Tracks parameters and lifecycle state of a single replay operation.
+ *
+ * <p>A job selects a time-bounded slice of {@link SecurityEvent}s from an
+ * Iceberg table and publishes them to a Kafka topic at a configurable
+ * speed multiplier (1.0 = real-time, 10.0 = 10× faster).
+ *
+ * <p>JSON field names are snake_case; Java accessors are camelCase.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record ReplayJob(
-        String       jobId,
-        String       sourceTable,     // Iceberg table name in the data lake
-        String       targetTopic,     // Kafka topic to publish to
-        Instant      fromTime,
-        Instant      toTime,
-        double       speedMultiplier, // 1.0 = real-time, 10.0 = 10× faster
-        ReplayStatus status,
-        Instant      createdAt,
-        Instant      updatedAt,
-        long         eventsPublished,
-        String       errorMessage     // null when no error
+        @JsonProperty("job_id")           String       jobId,
+        @JsonProperty("source_table")     String       sourceTable,
+        @JsonProperty("target_topic")     String       targetTopic,
+        @JsonProperty("from_time")        Instant      fromTime,
+        @JsonProperty("to_time")          Instant      toTime,
+        @JsonProperty("speed_multiplier") double       speedMultiplier,
+        @JsonProperty("status")           ReplayStatus status,
+        @JsonProperty("created_at")       Instant      createdAt,
+        @JsonProperty("updated_at")       Instant      updatedAt,
+        @JsonProperty("events_published") long         eventsPublished,
+        @JsonProperty("error_message")    String       errorMessage
 ) {
-    /** Convenience factory for a new job in PENDING state. */
+    /** Factory — creates a new job in {@link ReplayStatus#PENDING} state. */
     public static ReplayJob create(
-            String jobId,
-            String sourceTable,
-            String targetTopic,
+            String  jobId,
+            String  sourceTable,
+            String  targetTopic,
             Instant fromTime,
             Instant toTime,
-            double speedMultiplier) {
+            double  speedMultiplier) {
         var now = Instant.now();
         return new ReplayJob(jobId, sourceTable, targetTopic,
                 fromTime, toTime, speedMultiplier,
