@@ -1,7 +1,7 @@
 package com.example.replay.api;
 
+import com.example.replay.actors.JobManager;
 import com.example.replay.actors.Messages;
-import com.example.replay.actors.ReplayCoordinator;
 import com.example.replay.rest.MinimalHttpServer;
 import com.example.replay.storage.InMemoryJobRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -31,13 +31,16 @@ class JobsHandlerTest {
     @BeforeAll
     static void setUp() throws Exception {
         var repo = new InMemoryJobRepository();
-        system = ActorSystem.create(ReplayCoordinator.create(repo), "test-replay");
+        system = ActorSystem.create(JobManager.create(repo), "test-replay");
         var handler = new JobsHandler(system, repo);
 
         server = new MinimalHttpServer(0)           // OS picks a free port
-                .post("/api/v1/replay/jobs",        handler::create)
-                .get("/api/v1/replay/jobs",         handler::list)
-                .get("/api/v1/replay/jobs/{id}",    handler::getById);
+                .post("/api/v1/replay/jobs",              handler::create)
+                .get("/api/v1/replay/jobs",               handler::list)
+                .get("/api/v1/replay/jobs/{id}",          handler::getById)
+                .post("/api/v1/replay/jobs/{id}/pause",   handler::pause)
+                .post("/api/v1/replay/jobs/{id}/resume",  handler::resume)
+                .delete("/api/v1/replay/jobs/{id}",       handler::cancel);
         server.start();
         port = server.boundPort();
 
@@ -282,8 +285,108 @@ class JobsHandlerTest {
     }
 
     // -----------------------------------------------------------------------
+    // POST /api/v1/replay/jobs/{id}/pause
+    // -----------------------------------------------------------------------
+
+    @Test
+    void pause_runningJob_returns200WithPausedStatus() throws Exception {
+        var jobId = createAndGetId();
+
+        var resp = post("/api/v1/replay/jobs/" + jobId + "/pause", "");
+        assertEquals(200, resp.statusCode(), resp.body());
+        assertEquals("PAUSED", json(resp).get("status").asText());
+    }
+
+    @Test
+    void pause_unknownJob_returns404() throws Exception {
+        var resp = post("/api/v1/replay/jobs/ghost/pause", "");
+        assertEquals(404, resp.statusCode());
+    }
+
+    @Test
+    void pause_alreadyPaused_returns422() throws Exception {
+        var jobId = createAndGetId();
+        post("/api/v1/replay/jobs/" + jobId + "/pause", "");  // first pause
+
+        var resp = post("/api/v1/replay/jobs/" + jobId + "/pause", "");
+        assertEquals(422, resp.statusCode());
+    }
+
+    // -----------------------------------------------------------------------
+    // POST /api/v1/replay/jobs/{id}/resume
+    // -----------------------------------------------------------------------
+
+    @Test
+    void resume_pausedJob_returns200WithRunningStatus() throws Exception {
+        var jobId = createAndGetId();
+        post("/api/v1/replay/jobs/" + jobId + "/pause", "");
+
+        var resp = post("/api/v1/replay/jobs/" + jobId + "/resume", "");
+        assertEquals(200, resp.statusCode(), resp.body());
+        assertEquals("RUNNING", json(resp).get("status").asText());
+    }
+
+    @Test
+    void resume_runningJob_returns422() throws Exception {
+        var jobId = createAndGetId();  // already RUNNING
+
+        var resp = post("/api/v1/replay/jobs/" + jobId + "/resume", "");
+        assertEquals(422, resp.statusCode());
+    }
+
+    // -----------------------------------------------------------------------
+    // DELETE /api/v1/replay/jobs/{id}
+    // -----------------------------------------------------------------------
+
+    @Test
+    void cancel_runningJob_returns200WithCancelledStatus() throws Exception {
+        var jobId = createAndGetId();
+
+        var resp = delete("/api/v1/replay/jobs/" + jobId);
+        assertEquals(200, resp.statusCode(), resp.body());
+        assertEquals("CANCELLED", json(resp).get("status").asText());
+    }
+
+    @Test
+    void cancel_pausedJob_returns200() throws Exception {
+        var jobId = createAndGetId();
+        post("/api/v1/replay/jobs/" + jobId + "/pause", "");
+
+        var resp = delete("/api/v1/replay/jobs/" + jobId);
+        assertEquals(200, resp.statusCode());
+        assertEquals("CANCELLED", json(resp).get("status").asText());
+    }
+
+    @Test
+    void cancel_unknownJob_returns404() throws Exception {
+        var resp = delete("/api/v1/replay/jobs/nobody");
+        assertEquals(404, resp.statusCode());
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    /** Creates a job with a unique topic and returns its job_id. */
+    private String createAndGetId() throws Exception {
+        var resp = post("""
+                {
+                  "source_table": "db.events",
+                  "target_topic": "lc-topic-%d",
+                  "from_time":    "2024-07-01T00:00:00Z",
+                  "to_time":      "2024-07-02T00:00:00Z"
+                }""".formatted(System.nanoTime()));
+        assertEquals(201, resp.statusCode(), resp.body());
+        return json(resp).get("job_id").asText();
+    }
+
+    private HttpResponse<String> delete(String path) throws Exception {
+        return client.send(
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                        .DELETE()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
 
     private HttpResponse<String> get(String path) throws Exception {
         return client.send(
@@ -294,8 +397,12 @@ class JobsHandlerTest {
     }
 
     private HttpResponse<String> post(String body) throws Exception {
+        return post("/api/v1/replay/jobs", body);
+    }
+
+    private HttpResponse<String> post(String path, String body) throws Exception {
         return client.send(
-                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/replay/jobs"))
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                         .POST(HttpRequest.BodyPublishers.ofString(body))
                         .header("Content-Type", "application/json")
                         .build(),
