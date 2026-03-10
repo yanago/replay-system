@@ -25,7 +25,8 @@ import java.util.Map;
  *
  * <p>Supported job lifecycle transitions via {@link CoordinatorCommand}:
  * <pre>
- *   SubmitJob  → PENDING → RUNNING  (spawns ReplayJobActor)
+ *   SubmitJob  → PENDING            (persists job; no actor spawned yet)
+ *   StartJob   → PENDING → RUNNING  (spawns ReplayJobActor)
  *   PauseJob   → RUNNING → PAUSED   (tells ReplayJobActor.Pause)
  *   ResumeJob  → PAUSED  → RUNNING  (tells ReplayJobActor.Resume)
  *   CancelJob  → any     → CANCELLED
@@ -60,6 +61,7 @@ public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
     public Receive<CoordinatorCommand> createReceive() {
         return newReceiveBuilder()
                 .onMessage(CoordinatorCommand.SubmitJob.class,     this::onSubmit)
+                .onMessage(CoordinatorCommand.StartJob.class,      this::onStart)
                 .onMessage(CoordinatorCommand.PauseJob.class,      this::onPause)
                 .onMessage(CoordinatorCommand.ResumeJob.class,     this::onResume)
                 .onMessage(CoordinatorCommand.CancelJob.class,     this::onCancel)
@@ -77,17 +79,36 @@ public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
     // -----------------------------------------------------------------------
 
     private Behavior<CoordinatorCommand> onSubmit(CoordinatorCommand.SubmitJob msg) {
-        var job = msg.job().withStatus(ReplayStatus.RUNNING);
+        // Job is created in PENDING state — call StartJob to begin processing.
+        var job = msg.job(); // status is already PENDING from ReplayJob.create()
         repo.save(job);
+        getContext().getLog().info("Job {} created (PENDING)", job.jobId());
+        msg.replyTo().tell(new CoordinatorResponse.JobAccepted(job));
+        return this;
+    }
+
+    private Behavior<CoordinatorCommand> onStart(CoordinatorCommand.StartJob msg) {
+        var job = repo.findById(msg.jobId()).orElse(null);
+        if (job == null) {
+            msg.replyTo().tell(new CoordinatorResponse.JobNotFound(msg.jobId()));
+            return this;
+        }
+        if (job.status() != ReplayStatus.PENDING) {
+            msg.replyTo().tell(new CoordinatorResponse.Rejected(
+                    "job is not PENDING (current: " + job.status() + ")"));
+            return this;
+        }
+        var running = job.withStatus(ReplayStatus.RUNNING);
+        repo.update(running);
 
         var workerRef = getContext().spawn(
-                ReplayJobActor.create(job, repo, getContext().getSelf()),
-                "replay-job-" + job.jobId());
-        workers.put(job.jobId(), workerRef);
+                ReplayJobActor.create(running, repo, getContext().getSelf()),
+                "replay-job-" + running.jobId());
+        workers.put(running.jobId(), workerRef);
         workerRef.tell(new Messages.ReplayJobCommand.Start());
 
-        getContext().getLog().info("Job {} submitted — ReplayJobActor spawned", job.jobId());
-        msg.replyTo().tell(new CoordinatorResponse.JobAccepted(job));
+        getContext().getLog().info("Job {} started — ReplayJobActor spawned", msg.jobId());
+        msg.replyTo().tell(new CoordinatorResponse.JobStarted(running));
         return this;
     }
 

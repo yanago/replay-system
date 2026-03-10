@@ -20,12 +20,14 @@ import java.util.concurrent.TimeUnit;
  * Handler for the replay-jobs REST resource.
  *
  * <pre>
- *   POST    /api/v1/replay/jobs            → {@link #create}
- *   GET     /api/v1/replay/jobs            → {@link #list}
- *   GET     /api/v1/replay/jobs/{id}       → {@link #getById}
- *   POST    /api/v1/replay/jobs/{id}/pause → {@link #pause}
- *   POST    /api/v1/replay/jobs/{id}/resume→ {@link #resume}
- *   DELETE  /api/v1/replay/jobs/{id}       → {@link #cancel}
+ *   POST    /api/v1/replay/jobs             → {@link #create}   (creates PENDING)
+ *   GET     /api/v1/replay/jobs             → {@link #list}
+ *   GET     /api/v1/replay/jobs/{id}        → {@link #getById}
+ *   POST    /api/v1/replay/jobs/{id}/start  → {@link #start}    (PENDING → RUNNING)
+ *   POST    /api/v1/replay/jobs/{id}/pause  → {@link #pause}    (RUNNING → PAUSED)
+ *   POST    /api/v1/replay/jobs/{id}/resume → {@link #resume}   (PAUSED  → RUNNING)
+ *   POST    /api/v1/replay/jobs/{id}/cancel → {@link #cancel}   (any     → CANCELLED)
+ *   DELETE  /api/v1/replay/jobs/{id}        → {@link #cancel}   (alias)
  * </pre>
  *
  * Handlers are plain {@code Function<HttpRequest, HttpResponse>} so they plug
@@ -164,6 +166,25 @@ public final class JobsHandler {
     }
 
     // -----------------------------------------------------------------------
+    // POST /api/v1/replay/jobs/{id}/start
+    // -----------------------------------------------------------------------
+
+    /**
+     * Starts a pending replay job (PENDING → RUNNING).
+     *
+     * <p>Responses:
+     * <ul>
+     *   <li>{@code 200 OK} — {@link ReplayJob} in RUNNING state</li>
+     *   <li>{@code 404 Not Found} — unknown job ID</li>
+     *   <li>{@code 422 Unprocessable Entity} — job not in PENDING state</li>
+     * </ul>
+     */
+    public HttpResponse start(HttpRequest req) {
+        return lifecycle(req, replyTo ->
+                new Messages.CoordinatorCommand.StartJob(req.pathParam("id"), replyTo));
+    }
+
+    // -----------------------------------------------------------------------
     // POST /api/v1/replay/jobs/{id}/pause
     // -----------------------------------------------------------------------
 
@@ -202,11 +223,11 @@ public final class JobsHandler {
     }
 
     // -----------------------------------------------------------------------
-    // DELETE /api/v1/replay/jobs/{id}
+    // POST /api/v1/replay/jobs/{id}/cancel  and  DELETE /api/v1/replay/jobs/{id}
     // -----------------------------------------------------------------------
 
     /**
-     * Cancels a replay job (any status).
+     * Cancels a replay job (any non-terminal status).
      *
      * <p>Responses:
      * <ul>
@@ -244,6 +265,7 @@ public final class JobsHandler {
 
             return switch (response) {
                 case Messages.CoordinatorResponse.JobAccepted  a -> HttpResponse.ok(JsonUtils.toJson(a.job()));
+                case Messages.CoordinatorResponse.JobStarted   s -> HttpResponse.ok(JsonUtils.toJson(s.job()));
                 case Messages.CoordinatorResponse.JobSnapshot  s -> HttpResponse.ok(JsonUtils.toJson(s.job()));
                 case Messages.CoordinatorResponse.JobPaused    p -> HttpResponse.ok(JsonUtils.toJson(p.job()));
                 case Messages.CoordinatorResponse.JobResumed   r -> HttpResponse.ok(JsonUtils.toJson(r.job()));

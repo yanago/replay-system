@@ -61,12 +61,14 @@ public final class ReplayApplication {
         var http = new MinimalHttpServer(port)
                 .get("/health", req -> HttpResponse.ok(
                         "{\"status\":\"OK\",\"timestamp\":\"%s\"}".formatted(Instant.now())))
-                .post("/api/v1/replay/jobs",              jobsHandler::create)
-                .get("/api/v1/replay/jobs",               jobsHandler::list)
-                .get("/api/v1/replay/jobs/{id}",          jobsHandler::getById)
-                .post("/api/v1/replay/jobs/{id}/pause",   jobsHandler::pause)
-                .post("/api/v1/replay/jobs/{id}/resume",  jobsHandler::resume)
-                .delete("/api/v1/replay/jobs/{id}",       jobsHandler::cancel);
+                .post("/api/v1/replay/jobs",               jobsHandler::create)
+                .get("/api/v1/replay/jobs",                jobsHandler::list)
+                .get("/api/v1/replay/jobs/{id}",           jobsHandler::getById)
+                .post("/api/v1/replay/jobs/{id}/start",    jobsHandler::start)
+                .post("/api/v1/replay/jobs/{id}/pause",    jobsHandler::pause)
+                .post("/api/v1/replay/jobs/{id}/resume",   jobsHandler::resume)
+                .post("/api/v1/replay/jobs/{id}/cancel",   jobsHandler::cancel)
+                .delete("/api/v1/replay/jobs/{id}",        jobsHandler::cancel);
 
         http.start();
 

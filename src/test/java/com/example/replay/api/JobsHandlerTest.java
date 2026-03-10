@@ -35,12 +35,14 @@ class JobsHandlerTest {
         var handler = new JobsHandler(system, repo);
 
         server = new MinimalHttpServer(0)           // OS picks a free port
-                .post("/api/v1/replay/jobs",              handler::create)
-                .get("/api/v1/replay/jobs",               handler::list)
-                .get("/api/v1/replay/jobs/{id}",          handler::getById)
-                .post("/api/v1/replay/jobs/{id}/pause",   handler::pause)
-                .post("/api/v1/replay/jobs/{id}/resume",  handler::resume)
-                .delete("/api/v1/replay/jobs/{id}",       handler::cancel);
+                .post("/api/v1/replay/jobs",               handler::create)
+                .get("/api/v1/replay/jobs",                handler::list)
+                .get("/api/v1/replay/jobs/{id}",           handler::getById)
+                .post("/api/v1/replay/jobs/{id}/start",    handler::start)
+                .post("/api/v1/replay/jobs/{id}/pause",    handler::pause)
+                .post("/api/v1/replay/jobs/{id}/resume",   handler::resume)
+                .post("/api/v1/replay/jobs/{id}/cancel",   handler::cancel)
+                .delete("/api/v1/replay/jobs/{id}",        handler::cancel);
         server.start();
         port = server.boundPort();
 
@@ -75,7 +77,7 @@ class JobsHandlerTest {
         assertEquals(201, resp.statusCode());
         var body = json(resp);
         assertNotNull(body.get("job_id"),       "missing job_id");
-        assertEquals("RUNNING", body.get("status").asText());
+        assertEquals("PENDING", body.get("status").asText());
         assertEquals("db.security_events", body.get("source_table").asText());
         assertEquals("replay-output",      body.get("target_topic").asText());
         assertEquals(2.0, body.get("speed_multiplier").asDouble(), 1e-9);
@@ -93,6 +95,7 @@ class JobsHandlerTest {
                 }""");
 
         assertEquals(201, resp.statusCode());
+        assertEquals("PENDING", json(resp).get("status").asText());
         assertEquals(1.0, json(resp).get("speed_multiplier").asDouble(), 1e-9);
     }
 
@@ -285,6 +288,33 @@ class JobsHandlerTest {
     }
 
     // -----------------------------------------------------------------------
+    // POST /api/v1/replay/jobs/{id}/start
+    // -----------------------------------------------------------------------
+
+    @Test
+    void start_pendingJob_returns200WithRunningStatus() throws Exception {
+        var jobId = createJobId();   // PENDING
+
+        var resp = post("/api/v1/replay/jobs/" + jobId + "/start", "");
+        assertEquals(200, resp.statusCode(), resp.body());
+        assertEquals("RUNNING", json(resp).get("status").asText());
+    }
+
+    @Test
+    void start_unknownJob_returns404() throws Exception {
+        var resp = post("/api/v1/replay/jobs/ghost/start", "");
+        assertEquals(404, resp.statusCode());
+    }
+
+    @Test
+    void start_alreadyRunningJob_returns422() throws Exception {
+        var jobId = createAndGetId();   // PENDING → RUNNING
+
+        var resp = post("/api/v1/replay/jobs/" + jobId + "/start", "");
+        assertEquals(422, resp.statusCode());
+    }
+
+    // -----------------------------------------------------------------------
     // POST /api/v1/replay/jobs/{id}/pause
     // -----------------------------------------------------------------------
 
@@ -363,12 +393,30 @@ class JobsHandlerTest {
         assertEquals(404, resp.statusCode());
     }
 
+    @Test
+    void cancel_viaPostEndpoint_returns200() throws Exception {
+        var jobId = createAndGetId();
+
+        var resp = post("/api/v1/replay/jobs/" + jobId + "/cancel", "");
+        assertEquals(200, resp.statusCode(), resp.body());
+        assertEquals("CANCELLED", json(resp).get("status").asText());
+    }
+
+    @Test
+    void cancel_pendingJob_returns200() throws Exception {
+        var jobId = createJobId();   // PENDING, never started
+
+        var resp = post("/api/v1/replay/jobs/" + jobId + "/cancel", "");
+        assertEquals(200, resp.statusCode(), resp.body());
+        assertEquals("CANCELLED", json(resp).get("status").asText());
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    /** Creates a job with a unique topic and returns its job_id. */
-    private String createAndGetId() throws Exception {
+    /** Creates a PENDING job and returns its job_id. */
+    private String createJobId() throws Exception {
         var resp = post("""
                 {
                   "source_table": "db.events",
@@ -378,6 +426,14 @@ class JobsHandlerTest {
                 }""".formatted(System.nanoTime()));
         assertEquals(201, resp.statusCode(), resp.body());
         return json(resp).get("job_id").asText();
+    }
+
+    /** Creates a job, starts it (PENDING → RUNNING), and returns its job_id. */
+    private String createAndGetId() throws Exception {
+        var jobId = createJobId();
+        var startResp = post("/api/v1/replay/jobs/" + jobId + "/start", "");
+        assertEquals(200, startResp.statusCode(), startResp.body());
+        return jobId;
     }
 
     private HttpResponse<String> delete(String path) throws Exception {

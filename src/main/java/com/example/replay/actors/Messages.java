@@ -34,6 +34,7 @@ public final class Messages {
      */
     public sealed interface CoordinatorCommand permits
             CoordinatorCommand.SubmitJob,
+            CoordinatorCommand.StartJob,
             CoordinatorCommand.PauseJob,
             CoordinatorCommand.ResumeJob,
             CoordinatorCommand.CancelJob,
@@ -46,6 +47,10 @@ public final class Messages {
 
         record SubmitJob(ReplayJob job,
                          ActorRef<CoordinatorResponse> replyTo)   implements CoordinatorCommand {}
+
+        /** Transitions a PENDING job to RUNNING and spawns its {@link ReplayJobActor}. */
+        record StartJob(String jobId,
+                        ActorRef<CoordinatorResponse> replyTo)    implements CoordinatorCommand {}
 
         record PauseJob(String jobId,
                         ActorRef<CoordinatorResponse> replyTo)    implements CoordinatorCommand {}
@@ -77,6 +82,7 @@ public final class Messages {
     /** Responses sent back to HTTP handlers via {@code AskPattern}. */
     public sealed interface CoordinatorResponse permits
             CoordinatorResponse.JobAccepted,
+            CoordinatorResponse.JobStarted,
             CoordinatorResponse.JobNotFound,
             CoordinatorResponse.JobSnapshot,
             CoordinatorResponse.JobList,
@@ -85,6 +91,7 @@ public final class Messages {
             CoordinatorResponse.Rejected {
 
         record JobAccepted(ReplayJob job)          implements CoordinatorResponse {}
+        record JobStarted(ReplayJob job)           implements CoordinatorResponse {}
         record JobNotFound(String jobId)           implements CoordinatorResponse {}
         record JobSnapshot(ReplayJob job)          implements CoordinatorResponse {}
         record JobList(List<ReplayJob> jobs)       implements CoordinatorResponse {}
