@@ -4,6 +4,7 @@ import com.example.replay.actors.Messages.CoordinatorCommand;
 import com.example.replay.actors.Messages.CoordinatorResponse;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.model.ReplayStatus;
+import com.example.replay.storage.InMemoryJobRepository;
 import org.apache.pekko.actor.testkit.typed.javadsl.ActorTestKit;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,7 @@ class ReplayCoordinatorTest {
 
     @Test
     void submitJob_returnsJobAccepted() {
-        var coordinator = testKit.spawn(ReplayCoordinator.create(), "coordinator-test");
+        var coordinator = testKit.spawn(ReplayCoordinator.create(new InMemoryJobRepository()), "coordinator-test");
         var probe       = testKit.<CoordinatorResponse>createTestProbe();
 
         var job = ReplayJob.create("job-1", "events.security", "replay-topic",
@@ -40,7 +41,7 @@ class ReplayCoordinatorTest {
 
     @Test
     void getJob_notFoundForUnknownId() {
-        var coordinator = testKit.spawn(ReplayCoordinator.create(), "coordinator-nf");
+        var coordinator = testKit.spawn(ReplayCoordinator.create(new InMemoryJobRepository()), "coordinator-nf");
         var probe       = testKit.<CoordinatorResponse>createTestProbe();
 
         coordinator.tell(new CoordinatorCommand.GetJob("no-such-job", probe.getRef()));
@@ -51,7 +52,7 @@ class ReplayCoordinatorTest {
 
     @Test
     void listJobs_returnsAllSubmittedJobs() {
-        var coordinator = testKit.spawn(ReplayCoordinator.create(), "coordinator-list");
+        var coordinator = testKit.spawn(ReplayCoordinator.create(new InMemoryJobRepository()), "coordinator-list");
         var probe       = testKit.<CoordinatorResponse>createTestProbe();
 
         var job = ReplayJob.create("job-list-1", "tbl", "topic",

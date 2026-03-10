@@ -3,6 +3,7 @@ package com.example.replay.api;
 import com.example.replay.actors.Messages;
 import com.example.replay.actors.ReplayCoordinator;
 import com.example.replay.rest.MinimalHttpServer;
+import com.example.replay.storage.InMemoryJobRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -29,11 +30,14 @@ class JobsHandlerTest {
 
     @BeforeAll
     static void setUp() throws Exception {
-        system = ActorSystem.create(ReplayCoordinator.create(), "test-replay");
-        var handler = new JobsHandler(system);
+        var repo = new InMemoryJobRepository();
+        system = ActorSystem.create(ReplayCoordinator.create(repo), "test-replay");
+        var handler = new JobsHandler(system, repo);
 
         server = new MinimalHttpServer(0)           // OS picks a free port
-                .post("/api/v1/replay/jobs", handler::create);
+                .post("/api/v1/replay/jobs",        handler::create)
+                .get("/api/v1/replay/jobs",         handler::list)
+                .get("/api/v1/replay/jobs/{id}",    handler::getById);
         server.start();
         port = server.boundPort();
 
@@ -212,8 +216,82 @@ class JobsHandlerTest {
     }
 
     // -----------------------------------------------------------------------
+    // GET /api/v1/replay/jobs
+    // -----------------------------------------------------------------------
+
+    @Test
+    void list_returnsJsonArray() throws Exception {
+        var resp = get("/api/v1/replay/jobs");
+        assertEquals(200, resp.statusCode());
+        var body = mapper.readTree(resp.body());
+        assertTrue(body.isArray(), "expected JSON array, got: " + resp.body());
+    }
+
+    @Test
+    void list_afterCreate_containsJob() throws Exception {
+        post("""
+                {
+                  "source_table": "db.events",
+                  "target_topic": "list-test-topic",
+                  "from_time":    "2024-05-01T00:00:00Z",
+                  "to_time":      "2024-05-02T00:00:00Z"
+                }""");
+
+        var resp = get("/api/v1/replay/jobs");
+        assertEquals(200, resp.statusCode());
+        var array = mapper.readTree(resp.body());
+        assertTrue(array.isArray());
+        // At least one job with our topic exists
+        boolean found = false;
+        for (var node : array) {
+            if ("list-test-topic".equals(node.path("target_topic").asText())) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found, "Created job not found in list response");
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /api/v1/replay/jobs/{id}
+    // -----------------------------------------------------------------------
+
+    @Test
+    void getById_returnsJob() throws Exception {
+        var createResp = post("""
+                {
+                  "source_table": "db.events",
+                  "target_topic": "get-by-id-topic",
+                  "from_time":    "2024-06-01T00:00:00Z",
+                  "to_time":      "2024-06-02T00:00:00Z"
+                }""");
+        assertEquals(201, createResp.statusCode());
+        var jobId = json(createResp).get("job_id").asText();
+
+        var getResp = get("/api/v1/replay/jobs/" + jobId);
+        assertEquals(200, getResp.statusCode());
+        var body = json(getResp);
+        assertEquals(jobId, body.get("job_id").asText());
+        assertEquals("get-by-id-topic", body.get("target_topic").asText());
+    }
+
+    @Test
+    void getById_unknownId_returns404() throws Exception {
+        var resp = get("/api/v1/replay/jobs/no-such-id");
+        assertEquals(404, resp.statusCode());
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    private HttpResponse<String> get(String path) throws Exception {
+        return client.send(
+                HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
 
     private HttpResponse<String> post(String body) throws Exception {
         return client.send(
