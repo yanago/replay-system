@@ -17,7 +17,7 @@ import java.util.Optional;
 /**
  * JDBC-based {@link ReplayJobRepository} backed by PostgreSQL.
  *
- * <p>Schema (auto-created if missing):
+ * <p>Schema (managed by Flyway — see {@code V1__create_replay_jobs.sql}):
  * <pre>
  *   CREATE TABLE replay_jobs (
  *     job_id           TEXT PRIMARY KEY,
@@ -57,9 +57,12 @@ public final class PostgresReplayJobRepository implements ReplayJobRepository {
 
     private final DataSource ds;
 
+    /**
+     * @param ds a fully-initialised {@link DataSource}; schema migrations must
+     *           have been applied before construction (see {@link DataSourceFactory}).
+     */
     public PostgresReplayJobRepository(DataSource ds) {
         this.ds = ds;
-        initSchema();
     }
 
     // -----------------------------------------------------------------------
@@ -172,31 +175,6 @@ public final class PostgresReplayJobRepository implements ReplayJobRepository {
     private static Instant toInstant(ResultSet rs, String col) throws SQLException {
         var ts = rs.getTimestamp(col);
         return ts == null ? null : ts.toInstant();
-    }
-
-    private void initSchema() {
-        var ddl = """
-                CREATE TABLE IF NOT EXISTS replay_jobs (
-                  job_id           TEXT PRIMARY KEY,
-                  source_table     TEXT             NOT NULL,
-                  target_topic     TEXT             NOT NULL,
-                  from_time        TIMESTAMPTZ      NOT NULL,
-                  to_time          TIMESTAMPTZ      NOT NULL,
-                  speed_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1.0,
-                  status           TEXT             NOT NULL,
-                  created_at       TIMESTAMPTZ      NOT NULL,
-                  updated_at       TIMESTAMPTZ      NOT NULL,
-                  events_published BIGINT           NOT NULL DEFAULT 0,
-                  error_message    TEXT
-                )
-                """;
-        try (var conn = ds.getConnection();
-             var ps   = conn.prepareStatement(ddl)) {
-            ps.execute();
-            log.info("replay_jobs schema verified");
-        } catch (SQLException e) {
-            throw new StorageException("Schema initialisation failed", e);
-        }
     }
 
     // Small unchecked wrapper so callers stay exception-free

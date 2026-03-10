@@ -5,7 +5,11 @@ import com.example.replay.actors.ReplayCoordinator;
 import com.example.replay.api.JobsHandler;
 import com.example.replay.rest.HttpResponse;
 import com.example.replay.rest.MinimalHttpServer;
+import com.example.replay.storage.DatabaseConfig;
+import com.example.replay.storage.DataSourceFactory;
 import com.example.replay.storage.InMemoryJobRepository;
+import com.example.replay.storage.PostgresReplayJobRepository;
+import com.example.replay.storage.ReplayJobRepository;
 import org.apache.pekko.actor.typed.ActorSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +39,16 @@ public final class ReplayApplication {
         log.info("Starting Replay System …");
 
         // --- Storage -----------------------------------------------------------
-        var repo = new InMemoryJobRepository();
+        // Use PostgreSQL when POSTGRES_URL is set; fall back to in-memory otherwise.
+        ReplayJobRepository repo;
+        if (DatabaseConfig.isConfigured()) {
+            var ds = DataSourceFactory.create(DatabaseConfig.fromEnv());
+            repo = new PostgresReplayJobRepository(ds);
+            log.info("Storage backend: PostgreSQL");
+        } else {
+            repo = new InMemoryJobRepository();
+            log.warn("Storage backend: in-memory (data will not survive restart — set POSTGRES_URL for persistence)");
+        }
 
         // --- Pekko actor system ------------------------------------------------
         ActorSystem<Messages.CoordinatorCommand> system =
