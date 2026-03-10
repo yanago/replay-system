@@ -227,6 +227,24 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- ============================================================ -->
+        <!--  Connection pooling                                          -->
+        <!-- ============================================================ -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>5.1.0</version>
+        </dependency>
+
+        <!-- ============================================================ -->
+        <!--  DB migrations                                               -->
+        <!-- ============================================================ -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>9.22.3</version>
+        </dependency>
+
         <!-- Testcontainers for integration tests (Kafka, Postgres) -->
         <dependency>
             <groupId>org.testcontainers</groupId>
