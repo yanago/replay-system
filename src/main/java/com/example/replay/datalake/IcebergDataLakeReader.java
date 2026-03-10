@@ -56,10 +56,11 @@ public final class IcebergDataLakeReader implements DataLakeReader {
             Table iceTable, Instant from, Instant to, long offset, int limit) {
 
         // Iceberg pushes the time filter down to the file-scan level.
+        // Filter on event_time (when the event occurred), stored as epoch-millis LONG.
         var scan = IcebergGenerics.read(iceTable)
                 .where(Expressions.and(
-                        Expressions.greaterThanOrEqual("occurred_at", from.toEpochMilli()),
-                        Expressions.lessThan("occurred_at", to.toEpochMilli())))
+                        Expressions.greaterThanOrEqual("event_time", from.toEpochMilli()),
+                        Expressions.lessThan("event_time", to.toEpochMilli())))
                 .build();
 
         var events = new ArrayList<SecurityEvent>(limit);
@@ -76,13 +77,20 @@ public final class IcebergDataLakeReader implements DataLakeReader {
     private SecurityEvent toEvent(Record rec) {
         return new SecurityEvent(
                 str(rec, "event_id"),
+                str(rec, "cid"),
+                epochMillis(rec, "event_timestamp"),
+                epochMillis(rec, "event_time"),
                 str(rec, "event_type"),
                 str(rec, "source_ip"),
                 str(rec, "target_host"),
                 str(rec, "severity"),
-                Instant.ofEpochMilli(((Number) rec.getField("occurred_at")).longValue()),
                 (Map<String, String>) rec.getField("attributes")
         );
+    }
+
+    private static Instant epochMillis(Record rec, String field) {
+        Object v = rec.getField(field);
+        return v == null ? Instant.EPOCH : Instant.ofEpochMilli(((Number) v).longValue());
     }
 
     private static String str(Record rec, String field) {

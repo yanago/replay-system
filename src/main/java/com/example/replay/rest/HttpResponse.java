@@ -55,6 +55,15 @@ public final class HttpResponse {
                 "{\"error\":\"" + escape(reason) + "\"}");
     }
 
+    /**
+     * General-purpose factory for responses with a pre-built JSON body.
+     * Use when neither {@link #ok}, {@link #created}, nor {@link #badRequest}
+     * fit — e.g. 422 Unprocessable Entity with a structured errors array.
+     */
+    public static HttpResponse of(int statusCode, String statusText, String jsonBody) {
+        return json(statusCode, statusText, jsonBody);
+    }
+
     // -----------------------------------------------------------------------
     // Serialisation
     // -----------------------------------------------------------------------
