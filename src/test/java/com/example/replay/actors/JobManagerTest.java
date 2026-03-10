@@ -44,10 +44,19 @@ class JobManagerTest {
                 Instant.parse("2024-01-02T00:00:00Z"), 1.0);
     }
 
+    /** Creates a PENDING job and returns it. */
     private ReplayJob submit(String id) {
         manager.tell(new CoordinatorCommand.SubmitJob(job(id), probe.getRef()));
         var accepted = (CoordinatorResponse.JobAccepted) probe.receiveMessage();
         return accepted.job();
+    }
+
+    /** Creates a PENDING job then starts it; returns the RUNNING job. */
+    private ReplayJob submitAndStart(String id) {
+        submit(id);
+        manager.tell(new CoordinatorCommand.StartJob(id, probe.getRef()));
+        var started = (CoordinatorResponse.JobStarted) probe.receiveMessage();
+        return started.job();
     }
 
     // -----------------------------------------------------------------------
@@ -55,23 +64,59 @@ class JobManagerTest {
     // -----------------------------------------------------------------------
 
     @Test
-    void submit_returnsJobAccepted_withRunningStatus() {
+    void submit_returnsJobAccepted_withPendingStatus() {
         manager.tell(new CoordinatorCommand.SubmitJob(job("j1"), probe.getRef()));
 
         var resp = probe.receiveMessage();
         assertInstanceOf(CoordinatorResponse.JobAccepted.class, resp);
         var accepted = (CoordinatorResponse.JobAccepted) resp;
-        assertEquals("j1",               accepted.job().jobId());
-        assertEquals(ReplayStatus.RUNNING, accepted.job().status());
+        assertEquals("j1",                accepted.job().jobId());
+        assertEquals(ReplayStatus.PENDING, accepted.job().status());
     }
 
     @Test
-    void submit_persistsJobInRepository() {
+    void submit_persistsJobInRepository_asPending() {
         submit("j2");
 
         var stored = repo.findById("j2");
         assertTrue(stored.isPresent());
-        assertEquals(ReplayStatus.RUNNING, stored.get().status());
+        assertEquals(ReplayStatus.PENDING, stored.get().status());
+    }
+
+    // -----------------------------------------------------------------------
+    // StartJob
+    // -----------------------------------------------------------------------
+
+    @Test
+    void start_pendingJob_returnsJobStarted_withRunningStatus() {
+        submit("s1");
+        manager.tell(new CoordinatorCommand.StartJob("s1", probe.getRef()));
+
+        var resp = probe.receiveMessage();
+        assertInstanceOf(CoordinatorResponse.JobStarted.class, resp);
+        assertEquals(ReplayStatus.RUNNING, ((CoordinatorResponse.JobStarted) resp).job().status());
+    }
+
+    @Test
+    void start_updatesStatusInRepository() {
+        submit("s2");
+        manager.tell(new CoordinatorCommand.StartJob("s2", probe.getRef()));
+        probe.receiveMessage();
+
+        assertEquals(ReplayStatus.RUNNING, repo.findById("s2").get().status());
+    }
+
+    @Test
+    void start_unknownJob_returnsJobNotFound() {
+        manager.tell(new CoordinatorCommand.StartJob("ghost", probe.getRef()));
+        assertInstanceOf(CoordinatorResponse.JobNotFound.class, probe.receiveMessage());
+    }
+
+    @Test
+    void start_alreadyRunningJob_returnsRejected() {
+        submitAndStart("s3");
+        manager.tell(new CoordinatorCommand.StartJob("s3", probe.getRef()));
+        assertInstanceOf(CoordinatorResponse.Rejected.class, probe.receiveMessage());
     }
 
     // -----------------------------------------------------------------------
@@ -110,7 +155,7 @@ class JobManagerTest {
 
     @Test
     void pause_runningJob_returnsJobPaused() {
-        submit("p1");
+        submitAndStart("p1");
 
         manager.tell(new CoordinatorCommand.PauseJob("p1", probe.getRef()));
         var resp = probe.receiveMessage();
@@ -120,7 +165,7 @@ class JobManagerTest {
 
     @Test
     void pause_updatesStatusInRepository() {
-        submit("p2");
+        submitAndStart("p2");
         manager.tell(new CoordinatorCommand.PauseJob("p2", probe.getRef()));
         probe.receiveMessage();
 
@@ -135,7 +180,7 @@ class JobManagerTest {
 
     @Test
     void pause_alreadyPausedJob_returnsRejected() {
-        submit("p3");
+        submitAndStart("p3");
         manager.tell(new CoordinatorCommand.PauseJob("p3", probe.getRef()));
         probe.receiveMessage(); // first pause accepted
 
@@ -149,7 +194,7 @@ class JobManagerTest {
 
     @Test
     void resume_pausedJob_returnsJobResumed() {
-        submit("r1");
+        submitAndStart("r1");
         manager.tell(new CoordinatorCommand.PauseJob("r1", probe.getRef()));
         probe.receiveMessage();
 
@@ -161,7 +206,7 @@ class JobManagerTest {
 
     @Test
     void resume_updatesStatusInRepository() {
-        submit("r2");
+        submitAndStart("r2");
         manager.tell(new CoordinatorCommand.PauseJob("r2", probe.getRef()));
         probe.receiveMessage();
         manager.tell(new CoordinatorCommand.ResumeJob("r2", probe.getRef()));
@@ -171,8 +216,8 @@ class JobManagerTest {
     }
 
     @Test
-    void resume_runningJob_returnsRejected() {
-        submit("r3");  // already RUNNING
+    void resume_nonPausedJob_returnsRejected() {
+        submitAndStart("r3");  // RUNNING, not PAUSED
         manager.tell(new CoordinatorCommand.ResumeJob("r3", probe.getRef()));
         assertInstanceOf(CoordinatorResponse.Rejected.class, probe.receiveMessage());
     }
@@ -182,8 +227,8 @@ class JobManagerTest {
     // -----------------------------------------------------------------------
 
     @Test
-    void cancel_runningJob_returnsSnapshot_withCancelledStatus() {
-        submit("c1");
+    void cancel_pendingJob_returnsSnapshot_withCancelledStatus() {
+        submit("c1");  // PENDING — cancel works on any status
         manager.tell(new CoordinatorCommand.CancelJob("c1", probe.getRef()));
 
         var resp = (CoordinatorResponse.JobSnapshot) probe.receiveMessage();
@@ -192,7 +237,7 @@ class JobManagerTest {
 
     @Test
     void cancel_pausedJob_succeeds() {
-        submit("c2");
+        submitAndStart("c2");
         manager.tell(new CoordinatorCommand.PauseJob("c2", probe.getRef()));
         probe.receiveMessage();
 
