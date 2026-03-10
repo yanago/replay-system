@@ -5,6 +5,7 @@ import com.example.replay.actors.ReplayCoordinator;
 import com.example.replay.api.JobsHandler;
 import com.example.replay.rest.HttpResponse;
 import com.example.replay.rest.MinimalHttpServer;
+import com.example.replay.storage.InMemoryJobRepository;
 import org.apache.pekko.actor.typed.ActorSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,18 +34,23 @@ public final class ReplayApplication {
 
         log.info("Starting Replay System …");
 
+        // --- Storage -----------------------------------------------------------
+        var repo = new InMemoryJobRepository();
+
         // --- Pekko actor system ------------------------------------------------
         ActorSystem<Messages.CoordinatorCommand> system =
-                ActorSystem.create(ReplayCoordinator.create(), "replay-system");
+                ActorSystem.create(ReplayCoordinator.create(repo), "replay-system");
 
         // --- Route handlers ----------------------------------------------------
-        var jobsHandler = new JobsHandler(system);
+        var jobsHandler = new JobsHandler(system, repo);
 
         // --- HTTP server -------------------------------------------------------
         var http = new MinimalHttpServer(port)
                 .get("/health", req -> HttpResponse.ok(
                         "{\"status\":\"OK\",\"timestamp\":\"%s\"}".formatted(Instant.now())))
-                .post("/api/v1/replay/jobs", jobsHandler::create);
+                .post("/api/v1/replay/jobs",        jobsHandler::create)
+                .get("/api/v1/replay/jobs",         jobsHandler::list)
+                .get("/api/v1/replay/jobs/{id}",    jobsHandler::getById);
 
         http.start();
 

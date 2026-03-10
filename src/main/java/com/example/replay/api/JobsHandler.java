@@ -4,6 +4,7 @@ import com.example.replay.actors.Messages;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.rest.HttpRequest;
 import com.example.replay.rest.HttpResponse;
+import com.example.replay.storage.ReplayJobRepository;
 import com.example.replay.util.JsonUtils;
 import org.apache.pekko.actor.typed.ActorSystem;
 import org.apache.pekko.actor.typed.javadsl.AskPattern;
@@ -19,7 +20,9 @@ import java.util.concurrent.TimeUnit;
  * Handler for the replay-jobs REST resource.
  *
  * <pre>
- *   POST  /api/v1/replay/jobs   → {@link #create}
+ *   POST   /api/v1/replay/jobs       → {@link #create}
+ *   GET    /api/v1/replay/jobs       → {@link #list}
+ *   GET    /api/v1/replay/jobs/{id}  → {@link #getById}
  * </pre>
  *
  * Handlers are plain {@code Function<HttpRequest, HttpResponse>} so they plug
@@ -33,9 +36,12 @@ public final class JobsHandler {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
     private final ActorSystem<Messages.CoordinatorCommand> system;
+    private final ReplayJobRepository                      repo;
 
-    public JobsHandler(ActorSystem<Messages.CoordinatorCommand> system) {
+    public JobsHandler(ActorSystem<Messages.CoordinatorCommand> system,
+                       ReplayJobRepository repo) {
         this.system = system;
+        this.repo   = repo;
     }
 
     // -----------------------------------------------------------------------
@@ -119,6 +125,39 @@ public final class JobsHandler {
             log.error("Failed to submit job to coordinator", e);
             return HttpResponse.internalError("failed to submit job: " + e.getMessage());
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /api/v1/replay/jobs
+    // -----------------------------------------------------------------------
+
+    /**
+     * Returns all replay jobs, ordered newest-first.
+     *
+     * <p>Response: {@code 200 OK} with a JSON array of {@link ReplayJob}.
+     */
+    public HttpResponse list(HttpRequest req) {
+        return HttpResponse.ok(JsonUtils.toJson(repo.findAll()));
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /api/v1/replay/jobs/{id}
+    // -----------------------------------------------------------------------
+
+    /**
+     * Returns a single replay job by ID.
+     *
+     * <p>Responses:
+     * <ul>
+     *   <li>{@code 200 OK} — {@link ReplayJob} as JSON</li>
+     *   <li>{@code 404 Not Found} — unknown job ID</li>
+     * </ul>
+     */
+    public HttpResponse getById(HttpRequest req) {
+        var id = req.pathParam("id");
+        return repo.findById(id)
+                .map(job -> HttpResponse.ok(JsonUtils.toJson(job)))
+                .orElse(HttpResponse.notFound("/api/v1/replay/jobs/" + id));
     }
 
     // -----------------------------------------------------------------------

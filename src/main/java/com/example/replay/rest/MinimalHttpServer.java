@@ -8,9 +8,13 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
@@ -21,25 +25,35 @@ import java.util.function.Function;
  * <p>Each accepted connection is handled on a Java 21 virtual thread, so
  * thousands of concurrent slow clients never exhaust the carrier-thread pool.
  *
+ * <p>Two route flavours:
+ * <ul>
+ *   <li><b>Exact</b>  – {@code .get("/health", h)}  → fastest, hash-lookup</li>
+ *   <li><b>Template</b> – {@code .get("/jobs/{id}", h)} → path params injected
+ *       into {@link HttpRequest#pathParams()}, tried in registration order</li>
+ * </ul>
+ *
  * <p>Usage:
  * <pre>
  *   var server = new MinimalHttpServer(8080)
- *       .get("/health", req -> HttpResponse.ok("{\"status\":\"OK\"}"))
- *       .post("/replay", req -> handleReplay(req));
+ *       .get("/health",        req -> HttpResponse.ok("{}"))
+ *       .get("/jobs/{id}",     req -> getJob(req.pathParam("id")))
+ *       .post("/jobs",         req -> createJob(req));
  *   server.start();
- *   // …
- *   server.stop();
  * </pre>
  */
 public final class MinimalHttpServer {
 
     private static final Logger log = LoggerFactory.getLogger(MinimalHttpServer.class);
 
-    private static final int READ_TIMEOUT_MS  = 5_000;
-    private static final int MAX_BODY_BYTES   = 1024 * 1024; // 1 MB
+    private static final int READ_TIMEOUT_MS = 5_000;
+    private static final int MAX_BODY_BYTES  = 1024 * 1024; // 1 MB
 
-    // method → (path → handler)
-    private final Map<String, Map<String, Function<HttpRequest, HttpResponse>>> routes =
+    // Exact routes: method → (literal-path → handler)
+    private final Map<String, Map<String, Function<HttpRequest, HttpResponse>>> exactRoutes =
+            new ConcurrentHashMap<>();
+
+    // Parameterised routes: method → ordered list of (template, handler)
+    private final Map<String, List<TemplateRoute>> templateRoutes =
             new ConcurrentHashMap<>();
 
     private final int port;
@@ -74,7 +88,15 @@ public final class MinimalHttpServer {
 
     private MinimalHttpServer register(String method, String path,
                                        Function<HttpRequest, HttpResponse> handler) {
-        routes.computeIfAbsent(method, key -> new ConcurrentHashMap<>()).put(path, handler);
+        if (path.contains("{")) {
+            templateRoutes
+                    .computeIfAbsent(method, k -> new CopyOnWriteArrayList<>())
+                    .add(new TemplateRoute(new PathTemplate(path), handler));
+        } else {
+            exactRoutes
+                    .computeIfAbsent(method, k -> new ConcurrentHashMap<>())
+                    .put(path, handler);
+        }
         return this;
     }
 
@@ -90,9 +112,8 @@ public final class MinimalHttpServer {
      */
     public void start() throws IOException {
         serverSocket = new ServerSocket(port);
-        // Virtual-thread executor: each connection gets its own lightweight thread
-        executor = Executors.newVirtualThreadPerTaskExecutor();
-        running  = true;
+        executor     = Executors.newVirtualThreadPerTaskExecutor();
+        running      = true;
         executor.submit(this::acceptLoop);
         log.info("MinimalHttpServer listening on port {}", serverSocket.getLocalPort());
     }
@@ -161,7 +182,6 @@ public final class MinimalHttpServer {
         var path    = parts[1];
         var version = parts.length > 2 ? parts[2] : "HTTP/1.1";
 
-        // Parse headers (normalise keys to lower-case)
         var headers       = new LinkedHashMap<String, String>();
         int contentLength = 0;
         String line;
@@ -171,13 +191,10 @@ public final class MinimalHttpServer {
                 var key = line.substring(0, colon).trim().toLowerCase();
                 var val = line.substring(colon + 1).trim();
                 headers.put(key, val);
-                if ("content-length".equals(key)) {
-                    contentLength = parseContentLength(val);
-                }
+                if ("content-length".equals(key)) contentLength = parseContentLength(val);
             }
         }
 
-        // Read body if present (guard against oversized payloads)
         String body = null;
         if (contentLength > 0) {
             int toRead = Math.min(contentLength, MAX_BODY_BYTES);
@@ -186,8 +203,8 @@ public final class MinimalHttpServer {
             body       = read > 0 ? new String(buf, 0, read) : "";
         }
 
-        return new HttpRequest(method, path, version,
-                Map.copyOf(headers), body);
+        // pathParams starts empty; router injects them before calling the handler
+        return new HttpRequest(method, path, version, Map.copyOf(headers), body, Map.of());
     }
 
     private int parseContentLength(String value) {
@@ -199,12 +216,23 @@ public final class MinimalHttpServer {
     // -----------------------------------------------------------------------
 
     private HttpResponse dispatch(HttpRequest req) {
-        var methodRoutes = routes.get(req.method());
-        if (methodRoutes == null) return HttpResponse.methodNotAllowed();
+        // 1. Exact match
+        var exact = exactRoutes.getOrDefault(req.method(), Map.of()).get(req.path());
+        if (exact != null) return invoke(exact, req);
 
-        var handler = methodRoutes.get(req.path());
-        if (handler == null) return HttpResponse.notFound(req.path());
+        // 2. Template match (tried in registration order)
+        for (var route : templateRoutes.getOrDefault(req.method(), List.of())) {
+            var params = route.template().match(req.path());
+            if (params != null) return invoke(route.handler(), req.withPathParams(params));
+        }
 
+        // 3. Check if path exists under another method → 405, else → 404
+        return pathExistsForAnyMethod(req.path())
+                ? HttpResponse.methodNotAllowed()
+                : HttpResponse.notFound(req.path());
+    }
+
+    private HttpResponse invoke(Function<HttpRequest, HttpResponse> handler, HttpRequest req) {
         try {
             return handler.apply(req);
         } catch (Exception e) {
@@ -212,4 +240,50 @@ public final class MinimalHttpServer {
             return HttpResponse.internalError(e.getMessage());
         }
     }
+
+    private boolean pathExistsForAnyMethod(String path) {
+        return exactRoutes.values().stream().anyMatch(m -> m.containsKey(path))
+                || templateRoutes.values().stream()
+                        .flatMap(List::stream)
+                        .anyMatch(r -> r.template().match(path) != null);
+    }
+
+    // -----------------------------------------------------------------------
+    // Path template
+    // -----------------------------------------------------------------------
+
+    /**
+     * Compiles a path pattern like {@code /api/v1/replay/jobs/{id}} into a
+     * segment array and matches incoming paths, extracting named parameters.
+     */
+    private record PathTemplate(String[] segments) {
+
+        PathTemplate(String pattern) {
+            this(pattern.split("/", -1));
+        }
+
+        /**
+         * Returns extracted path parameters if {@code requestPath} matches this
+         * template, or {@code null} if it does not.
+         */
+        Map<String, String> match(String requestPath) {
+            var reqSegs = requestPath.split("/", -1);
+            if (reqSegs.length != segments.length) return null;
+
+            var params = new HashMap<String, String>();
+            for (int i = 0; i < segments.length; i++) {
+                var seg = segments[i];
+                if (seg.startsWith("{") && seg.endsWith("}")) {
+                    params.put(seg.substring(1, seg.length() - 1), reqSegs[i]);
+                } else if (!seg.equals(reqSegs[i])) {
+                    return null;
+                }
+            }
+            return params;
+        }
+    }
+
+    private record TemplateRoute(
+            PathTemplate template,
+            Function<HttpRequest, HttpResponse> handler) {}
 }
