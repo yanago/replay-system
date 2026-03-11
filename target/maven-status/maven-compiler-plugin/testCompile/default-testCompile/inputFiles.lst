@@ -1,0 +1,16 @@
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/actors/JobManagerTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/actors/ReplayCoordinatorTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/actors/ReplayJobActorTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/actors/StubWorkPlanner.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/actors/WorkerPoolActorTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/api/JobValidatorTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/api/JobsHandlerTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/datalake/StubDataLakeReader.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/downstream/SimulatedDownstreamClientTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/downstream/StubDownstreamClient.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/kafka/KafkaEventPublisherTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/kafka/StubEventPublisher.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/rest/MinimalHttpServerTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/storage/InMemoryJobRepositoryTest.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/storage/PostgresReplayJobRepositoryIT.java
+/Users/vaskoyordanov/replay-system/src/test/java/com/example/replay/util/JsonUtilsTest.java

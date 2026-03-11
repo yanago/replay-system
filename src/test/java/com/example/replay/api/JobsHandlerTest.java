@@ -4,6 +4,8 @@ import com.example.replay.actors.JobManager;
 import com.example.replay.actors.Messages;
 import com.example.replay.actors.StubWorkPlanner;
 import com.example.replay.datalake.StubDataLakeReader;
+import com.example.replay.downstream.StubDownstreamClient;
+import com.example.replay.kafka.StubEventPublisher;
 import com.example.replay.rest.MinimalHttpServer;
 import com.example.replay.storage.InMemoryJobRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,7 +38,8 @@ class JobsHandlerTest {
         // 200 batches × 20 ms delay = ~4 s total — enough time for pause/resume/cancel
         // HTTP calls to land while the job is still RUNNING.
         system = ActorSystem.create(
-                JobManager.create(repo, new StubDataLakeReader(200, 5, 20L), new StubWorkPlanner(1), 1),
+                JobManager.create(repo, new StubDataLakeReader(200, 5, 20L), new StubWorkPlanner(1), 1,
+                        new StubEventPublisher(), new StubDownstreamClient()),
                 "test-replay");
         var handler = new JobsHandler(system, repo);
 

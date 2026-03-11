@@ -2,6 +2,8 @@ package com.example.replay.actors;
 
 import com.example.replay.actors.Messages.ReplayJobCommand;
 import com.example.replay.datalake.StubDataLakeReader;
+import com.example.replay.downstream.StubDownstreamClient;
+import com.example.replay.kafka.StubEventPublisher;
 import com.example.replay.storage.InMemoryJobRepository;
 import org.apache.pekko.actor.testkit.typed.javadsl.ActorTestKit;
 import org.apache.pekko.actor.testkit.typed.javadsl.FishingOutcomes;
@@ -57,7 +59,8 @@ class WorkerPoolActorTest {
         var reader  = new StubDataLakeReader(3, 10);  // 3 batches × 10 events = 30 total
         var packets = List.of(packet("loc-1", 3));
 
-        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader, probe.getRef(), 1));
+        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1));
         pool.tell(new Messages.WorkerPoolCommand.Start());
 
         var msg = probe.receiveMessage(WAIT);
@@ -79,7 +82,8 @@ class WorkerPoolActorTest {
                 packet("loc-b", 2),
                 packet("loc-c", 2));
 
-        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader, probe.getRef(), 2));
+        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2));
         pool.tell(new Messages.WorkerPoolCommand.Start());
 
         var msg = probe.receiveMessage(WAIT);
@@ -97,7 +101,8 @@ class WorkerPoolActorTest {
         var probe  = testKit.<ReplayJobCommand>createTestProbe();
         var reader = new StubDataLakeReader(3, 10);
 
-        var pool = testKit.spawn(WorkerPoolActor.create(List.of(), reader, probe.getRef(), 2));
+        var pool = testKit.spawn(WorkerPoolActor.create(List.of(), reader,
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2));
         pool.tell(new Messages.WorkerPoolCommand.Start());
 
         var msg = probe.receiveMessage(WAIT);
@@ -115,7 +120,8 @@ class WorkerPoolActorTest {
         var reader  = new StubDataLakeReader(5, 10, 30L);  // 30ms/batch keeps job alive
         var packets = List.of(packet("loc-pr", 5));
 
-        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader, probe.getRef(), 1));
+        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1));
         pool.tell(new Messages.WorkerPoolCommand.Start());
         pool.tell(new Messages.WorkerPoolCommand.Pause());
         pool.tell(new Messages.WorkerPoolCommand.Resume());
@@ -137,7 +143,8 @@ class WorkerPoolActorTest {
         var reader  = new StubDataLakeReader(100, 10, 50L);  // slow enough to cancel first
         var packets = List.of(packet("loc-cancel", 100));
 
-        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader, probe.getRef(), 1));
+        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1));
         pool.tell(new Messages.WorkerPoolCommand.Start());
         pool.tell(new Messages.WorkerPoolCommand.Cancel());
 
@@ -163,7 +170,8 @@ class WorkerPoolActorTest {
                 new WorkPacket(UUID.randomUUID().toString(), "loc", Instant.EPOCH,
                         Instant.EPOCH.plusSeconds(3600), 40L,  256L,  0.0, 1));
 
-        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader, probe.getRef(), 2));
+        var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2));
         pool.tell(new Messages.WorkerPoolCommand.Start());
 
         var msg = probe.receiveMessage(WAIT);
@@ -209,7 +217,9 @@ class WorkerPoolActorTest {
                 job, repo, coordProbe.getRef(),
                 new StubDataLakeReader(2, 10),
                 new StubWorkPlanner(2),    // 2 packets
-                2));                       // 2 workers
+                2,                         // 2 workers
+                new StubEventPublisher(),
+                new StubDownstreamClient()));
 
         actor.tell(new Messages.ReplayJobCommand.Start());
 

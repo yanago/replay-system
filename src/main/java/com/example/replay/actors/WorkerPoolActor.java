@@ -1,6 +1,8 @@
 package com.example.replay.actors;
 
 import com.example.replay.datalake.DataLakeReader;
+import com.example.replay.downstream.DownstreamClient;
+import com.example.replay.kafka.EventPublisher;
 import org.apache.pekko.actor.typed.ActorRef;
 import org.apache.pekko.actor.typed.Behavior;
 import org.apache.pekko.actor.typed.javadsl.AbstractBehavior;
@@ -47,6 +49,9 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
     private static final Logger log = LoggerFactory.getLogger(WorkerPoolActor.class);
 
     private final DataLakeReader                          reader;
+    private final EventPublisher                          publisher;
+    private final String                                  targetTopic;
+    private final DownstreamClient                        downstreamClient;
     private final int                                     numWorkers;
     private final ActorRef<Messages.ReplayJobCommand>     parent;
 
@@ -67,22 +72,32 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
     public static Behavior<Messages.WorkerPoolCommand> create(
             List<WorkPacket> packets,
             DataLakeReader reader,
+            EventPublisher publisher,
+            String targetTopic,
+            DownstreamClient downstreamClient,
             ActorRef<Messages.ReplayJobCommand> parent,
             int numWorkers) {
-        return Behaviors.setup(ctx -> new WorkerPoolActor(ctx, packets, reader, parent, numWorkers));
+        return Behaviors.setup(ctx ->
+                new WorkerPoolActor(ctx, packets, reader, publisher, targetTopic, downstreamClient, parent, numWorkers));
     }
 
     private WorkerPoolActor(ActorContext<Messages.WorkerPoolCommand> ctx,
                              List<WorkPacket> packets,
                              DataLakeReader reader,
+                             EventPublisher publisher,
+                             String targetTopic,
+                             DownstreamClient downstreamClient,
                              ActorRef<Messages.ReplayJobCommand> parent,
                              int numWorkers) {
         super(ctx);
-        this.reader     = reader;
-        this.numWorkers = numWorkers;
-        this.parent     = parent;
-        this.pending     = new ArrayDeque<>(packets);
-        this.totalPackets = packets.size();
+        this.reader           = reader;
+        this.publisher        = publisher;
+        this.targetTopic      = targetTopic;
+        this.downstreamClient = downstreamClient;
+        this.numWorkers       = numWorkers;
+        this.parent           = parent;
+        this.pending          = new ArrayDeque<>(packets);
+        this.totalPackets     = packets.size();
     }
 
     // -----------------------------------------------------------------------
@@ -210,7 +225,7 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
         while (!pending.isEmpty() && active.size() < numWorkers) {
             WorkPacket packet = pending.poll();
             var worker = getContext().spawn(
-                    PacketWorkerActor.create(reader, getContext().getSelf()),
+                    PacketWorkerActor.create(reader, publisher, targetTopic, downstreamClient, getContext().getSelf()),
                     "pworker-" + packet.packetId().substring(0, 8));
             active.put(worker, packet);
             worker.tell(new Messages.PacketWorkerCommand.Assign(packet));
