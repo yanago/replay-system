@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# deploy.sh  —  One-command build + deploy of the Replay System
+# deploy.sh  —  One-command build + deploy of the Replay System (local JVM)
 # =============================================================================
 # Usage:
 #   ./scripts/deploy.sh
+#
+# For Kubernetes (minikube/kind) deployment, use instead:
+#   ./scripts/k8s-deploy.sh [--kind] [--postgres-user USER] [--postgres-password PASS]
 #
 # Required environment variables (PostgreSQL — optional, falls back to in-memory):
 #   POSTGRES_URL       e.g. jdbc:postgresql://localhost:5432/replay

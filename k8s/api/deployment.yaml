@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: replay-api
+  namespace: replay-system
+  labels:
+    app.kubernetes.io/name: replay-api
+    app.kubernetes.io/part-of: replay-system
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: replay-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: replay-api
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: replay-api
+          image: replay-system:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: replay-config
+            - secretRef:
+                name: replay-secret
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "384Mi"
+            limits:
+              cpu: "1000m"
+              memory: "768Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: iceberg-data
+              mountPath: /data/iceberg-warehouse
+      volumes:
+        - name: iceberg-data
+          persistentVolumeClaim:
+            claimName: iceberg-data-pvc

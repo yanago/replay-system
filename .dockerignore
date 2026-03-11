@@ -1,0 +1,10 @@
+target/
+logs/
+data/
+.git/
+.idea/
+*.iml
+.DS_Store
+k8s/
+scripts/
+*.md
