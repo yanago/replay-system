@@ -2,6 +2,8 @@ package com.example.replay.actors;
 
 import com.example.replay.actors.Messages.CoordinatorCommand;
 import com.example.replay.datalake.StubDataLakeReader;
+import com.example.replay.downstream.StubDownstreamClient;
+import com.example.replay.kafka.StubEventPublisher;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.model.ReplayStatus;
 import com.example.replay.storage.InMemoryJobRepository;
@@ -54,7 +56,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-complete-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1, new StubEventPublisher(), new StubDownstreamClient()), "actor-complete-1");
         actor.tell(new Messages.ReplayJobCommand.Start());
 
         // Wait for WorkerFinished (5 batches × 200ms = ~1s)
@@ -77,7 +79,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-pause-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1, new StubEventPublisher(), new StubDownstreamClient()), "actor-pause-1");
         actor.tell(new Messages.ReplayJobCommand.Start());
         actor.tell(new Messages.ReplayJobCommand.Pause());
 
@@ -100,7 +102,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-pr-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1, new StubEventPublisher(), new StubDownstreamClient()), "actor-pr-1");
         actor.tell(new Messages.ReplayJobCommand.Start());
         actor.tell(new Messages.ReplayJobCommand.Pause());
         actor.tell(new Messages.ReplayJobCommand.Resume());
@@ -123,7 +125,7 @@ class ReplayJobActorTest {
         var job        = job("cancel-before-start");
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-cancel-bs");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1, new StubEventPublisher(), new StubDownstreamClient()), "actor-cancel-bs");
         actor.tell(new Messages.ReplayJobCommand.Cancel());
 
         // No WorkerFinished or WorkerFailed expected
@@ -138,7 +140,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-cancel-r-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1, new StubEventPublisher(), new StubDownstreamClient()), "actor-cancel-r-1");
         // Start dispatches an async readBatch, but Cancel is enqueued immediately
         // after Start. The actor processes Cancel before the BatchReady result
         // arrives (actor message ordering), stops cleanly, and the coordinator
@@ -161,7 +163,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-progress-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1, new StubEventPublisher(), new StubDownstreamClient()), "actor-progress-1");
         actor.tell(new Messages.ReplayJobCommand.Start());
 
         // Wait for completion

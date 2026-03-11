@@ -238,6 +238,7 @@ public final class Messages {
     public sealed interface PacketWorkerCommand permits
             PacketWorkerCommand.Assign,
             PacketWorkerCommand.BatchReady,
+            PacketWorkerCommand.BatchPublished,
             PacketWorkerCommand.Pause,
             PacketWorkerCommand.Resume,
             PacketWorkerCommand.Cancel {
@@ -250,6 +251,13 @@ public final class Messages {
 
         /** Internal pipeToSelf result. {@code events} is null when {@code error} is set. */
         record BatchReady(List<SecurityEvent> events, int batchIndex, Throwable error)
+                implements PacketWorkerCommand {}
+
+        /**
+         * Internal pipeToSelf result after Kafka publish + downstream HTTP POST complete.
+         * {@code eventsPublished} is 0 and {@code error} is non-null on failure.
+         */
+        record BatchPublished(int eventsPublished, int batchIndex, Throwable error)
                 implements PacketWorkerCommand {}
     }
 

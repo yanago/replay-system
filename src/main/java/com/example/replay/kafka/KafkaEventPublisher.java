@@ -3,6 +3,7 @@ package com.example.replay.kafka;
 import com.example.replay.model.SecurityEvent;
 import com.example.replay.util.JsonUtils;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
@@ -15,13 +16,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Kafka-backed {@link EventPublisher}.
- * Uses {@code eventId} as the record key for deterministic partitioning.
+ *
+ * <p>Uses {@code cid} (customer ID) as the record partition key so that all
+ * events for the same customer are ordered within a single partition.  This is
+ * critical for Zipf-skewed workloads: heavy customers produce many events, and
+ * routing them by {@code cid} ensures that downstream consumers can process a
+ * customer's full event stream sequentially without cross-partition merging.
  */
 public final class KafkaEventPublisher implements EventPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaEventPublisher.class);
 
-    private final KafkaProducer<String, String> producer;
+    private final Producer<String, String> producer;
 
     /**
      * Creates a publisher from explicit bootstrap configuration.
@@ -39,6 +45,11 @@ public final class KafkaEventPublisher implements EventPublisher {
         props.put("enable.idempotence", "true");
         props.putAll(extraProps);
         this.producer = new KafkaProducer<>(props);
+    }
+
+    /** Package-private constructor for unit tests — accepts any {@link Producer} implementation. */
+    KafkaEventPublisher(Producer<String, String> producer) {
+        this.producer = producer;
     }
 
     @Override
@@ -73,6 +84,9 @@ public final class KafkaEventPublisher implements EventPublisher {
 
     private ProducerRecord<String, String> toRecord(String topic, SecurityEvent event) {
         var json = JsonUtils.toJson(event);
-        return new ProducerRecord<>(topic, event.eventId(), json);
+        // Partition key = cid so all events for the same customer land in one partition.
+        // Heavy (Zipf-frequent) customers are naturally spread across partitions by
+        // Kafka's default murmur2 hash of the key string.
+        return new ProducerRecord<>(topic, event.cid(), json);
     }
 }

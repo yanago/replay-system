@@ -5,6 +5,12 @@ import com.example.replay.actors.Messages;
 import com.example.replay.actors.WorkPlanner;
 import com.example.replay.api.JobsHandler;
 import com.example.replay.datalake.IcebergDataLakeReader;
+import com.example.replay.downstream.DownstreamClient;
+import com.example.replay.downstream.HttpDownstreamClient;
+import com.example.replay.downstream.SimulatedDownstreamClient;
+import com.example.replay.kafka.EventPublisher;
+import com.example.replay.kafka.KafkaEventPublisher;
+import com.example.replay.kafka.NoOpEventPublisher;
 import org.apache.hadoop.conf.Configuration;
 import com.example.replay.rest.HttpResponse;
 import com.example.replay.rest.MinimalHttpServer;
@@ -65,9 +71,38 @@ public final class ReplayApplication {
 
         log.info("Work distribution: {} parallel workers per job", numWorkers);
 
+        // --- Kafka producer ----------------------------------------------------
+        // Uses cid (customer ID) as the partition key so all events for the same
+        // customer land in one partition.  Falls back to a no-op publisher when
+        // KAFKA_BOOTSTRAP_SERVERS is not set (local development / tests).
+        var kafkaBootstrap = System.getenv("KAFKA_BOOTSTRAP_SERVERS");
+        EventPublisher publisher;
+        if (kafkaBootstrap != null && !kafkaBootstrap.isBlank()) {
+            publisher = new KafkaEventPublisher(kafkaBootstrap, new java.util.Properties());
+            log.info("Kafka publisher enabled — brokers: {}", kafkaBootstrap);
+        } else {
+            publisher = new NoOpEventPublisher();
+            log.warn("Kafka publisher disabled — set KAFKA_BOOTSTRAP_SERVERS for real publishing");
+        }
+
+        // --- Downstream REST client --------------------------------------------
+        // POSTs each batch as a JSON array to DOWNSTREAM_URL when set; otherwise
+        // uses a simulated client that logs and discards events.
+        var downstreamUrl = System.getenv("DOWNSTREAM_URL");
+        DownstreamClient downstreamClient;
+        if (downstreamUrl != null && !downstreamUrl.isBlank()) {
+            downstreamClient = new HttpDownstreamClient(downstreamUrl);
+            log.info("Downstream HTTP client enabled — endpoint: {}", downstreamUrl);
+        } else {
+            downstreamClient = new SimulatedDownstreamClient();
+            log.warn("Downstream HTTP client disabled — set DOWNSTREAM_URL for real forwarding");
+        }
+
         // --- Pekko actor system ------------------------------------------------
         ActorSystem<Messages.CoordinatorCommand> system =
-                ActorSystem.create(JobManager.create(repo, dataLakeReader, planner, numWorkers), "replay-system");
+                ActorSystem.create(
+                        JobManager.create(repo, dataLakeReader, planner, numWorkers, publisher, downstreamClient),
+                        "replay-system");
 
         // --- Route handlers ----------------------------------------------------
         var jobsHandler = new JobsHandler(system, repo);
@@ -88,10 +123,14 @@ public final class ReplayApplication {
         http.start();
 
         // --- Shutdown hook -----------------------------------------------------
+        final var pub        = publisher;
+        final var downstream = downstreamClient;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutdown signal received");
             http.stop();
             system.terminate();
+            pub.close();
+            downstream.close();
         }, "shutdown-hook"));
 
         log.info("Replay System online — http://0.0.0.0:{}/", port);

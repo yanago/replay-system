@@ -1,6 +1,8 @@
 package com.example.replay.actors;
 
 import com.example.replay.datalake.DataLakeReader;
+import com.example.replay.downstream.DownstreamClient;
+import com.example.replay.kafka.EventPublisher;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.storage.ReplayJobRepository;
 import org.apache.pekko.actor.typed.ActorRef;
@@ -60,6 +62,8 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
     private final DataLakeReader                        dataLakeReader;
     private final WorkPlannerFn                         planner;
     private final int                                   numWorkers;
+    private final EventPublisher                        publisher;
+    private final DownstreamClient                      downstreamClient;
 
     private ActorRef<Messages.WorkerPoolCommand> workerPool;
 
@@ -76,9 +80,12 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
             ActorRef<Messages.CoordinatorCommand> coordinator,
             DataLakeReader dataLakeReader,
             WorkPlannerFn planner,
-            int numWorkers) {
+            int numWorkers,
+            EventPublisher publisher,
+            DownstreamClient downstreamClient) {
         return Behaviors.setup(ctx ->
-                new ReplayJobActor(ctx, job, repo, coordinator, dataLakeReader, planner, numWorkers));
+                new ReplayJobActor(ctx, job, repo, coordinator, dataLakeReader, planner, numWorkers,
+                        publisher, downstreamClient));
     }
 
     private ReplayJobActor(ActorContext<Messages.ReplayJobCommand> ctx,
@@ -87,14 +94,18 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
                             ActorRef<Messages.CoordinatorCommand> coordinator,
                             DataLakeReader dataLakeReader,
                             WorkPlannerFn planner,
-                            int numWorkers) {
+                            int numWorkers,
+                            EventPublisher publisher,
+                            DownstreamClient downstreamClient) {
         super(ctx);
-        this.job           = job;
-        this.repo          = repo;
-        this.coordinator   = coordinator;
-        this.dataLakeReader = dataLakeReader;
-        this.planner       = planner;
-        this.numWorkers    = numWorkers;
+        this.job              = job;
+        this.repo             = repo;
+        this.coordinator      = coordinator;
+        this.dataLakeReader   = dataLakeReader;
+        this.planner          = planner;
+        this.numWorkers       = numWorkers;
+        this.publisher        = publisher;
+        this.downstreamClient = downstreamClient;
     }
 
     // -----------------------------------------------------------------------
@@ -200,7 +211,8 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
         }
 
         workerPool = getContext().spawn(
-                WorkerPoolActor.create(packets, dataLakeReader, getContext().getSelf(), numWorkers),
+                WorkerPoolActor.create(packets, dataLakeReader, publisher, job.targetTopic(),
+                        downstreamClient, getContext().getSelf(), numWorkers),
                 "pool-" + job.jobId());
         workerPool.tell(new Messages.WorkerPoolCommand.Start());
 
