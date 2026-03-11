@@ -154,8 +154,7 @@ public final class DataGenerator {
             LocalDate date, int numEvents,
             org.apache.iceberg.AppendFiles appendOp) throws Exception {
 
-        long epochDay     = date.toEpochDay();
-        String partPath   = "event_time_day=" + epochDay;
+        String partPath   = "event_time_day=" + date;
 
         List<GenericRecord> buffer = new ArrayList<>(WRITE_BATCH_SIZE);
         int written = 0;
@@ -220,9 +219,8 @@ public final class DataGenerator {
 
         rec.setField("event_id",        UUID.randomUUID().toString());
         rec.setField("cid",             sampleCustomer());
-        // Iceberg TimestampType.withoutZone stores epoch-microseconds
-        rec.setField("event_timestamp", ingestTime.toEpochMilli() * 1_000L);
-        rec.setField("event_time",      eventTime.toEpochMilli()  * 1_000L);
+        rec.setField("event_timestamp", LocalDateTime.ofInstant(ingestTime, ZoneOffset.UTC));
+        rec.setField("event_time",      LocalDateTime.ofInstant(eventTime,  ZoneOffset.UTC));
         rec.setField("event_type",      EVENT_TYPES[rng.nextInt(EVENT_TYPES.length)]);
         rec.setField("source_ip",       SOURCE_IP_PREFIXES[rng.nextInt(SOURCE_IP_PREFIXES.length)]
                                         + (rng.nextInt(254) + 1));

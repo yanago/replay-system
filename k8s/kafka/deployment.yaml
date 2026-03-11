@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: kafka
-          image: bitnami/kafka:3.7
+          image: bitnamilegacy/kafka:3.7.0
           ports:
             - containerPort: 9092
               name: client
@@ -44,7 +44,7 @@ spec:
             - name: KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP
               value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
             - name: KAFKA_CFG_CONTROLLER_QUORUM_VOTERS
-              value: "0@kafka:9093"
+              value: "0@localhost:9093"
             # Single-replica topic defaults suitable for local dev
             - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
               value: "1"
