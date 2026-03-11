@@ -11,6 +11,7 @@ import com.example.replay.downstream.SimulatedDownstreamClient;
 import com.example.replay.kafka.EventPublisher;
 import com.example.replay.kafka.KafkaEventPublisher;
 import com.example.replay.kafka.NoOpEventPublisher;
+import com.example.replay.metrics.MetricsRegistry;
 import org.apache.hadoop.conf.Configuration;
 import com.example.replay.rest.HttpResponse;
 import com.example.replay.rest.MinimalHttpServer;
@@ -98,14 +99,17 @@ public final class ReplayApplication {
             log.warn("Downstream HTTP client disabled — set DOWNSTREAM_URL for real forwarding");
         }
 
+        // --- Metrics registry --------------------------------------------------
+        var registry = new MetricsRegistry();
+
         // --- Pekko actor system ------------------------------------------------
         ActorSystem<Messages.CoordinatorCommand> system =
                 ActorSystem.create(
-                        JobManager.create(repo, dataLakeReader, planner, numWorkers, publisher, downstreamClient),
+                        JobManager.create(repo, dataLakeReader, planner, numWorkers, publisher, downstreamClient, registry),
                         "replay-system");
 
         // --- Route handlers ----------------------------------------------------
-        var jobsHandler = new JobsHandler(system, repo);
+        var jobsHandler = new JobsHandler(system, repo, registry);
 
         // --- HTTP server -------------------------------------------------------
         var http = new MinimalHttpServer(port)
@@ -118,7 +122,9 @@ public final class ReplayApplication {
                 .post("/api/v1/replay/jobs/{id}/pause",    jobsHandler::pause)
                 .post("/api/v1/replay/jobs/{id}/resume",   jobsHandler::resume)
                 .post("/api/v1/replay/jobs/{id}/cancel",   jobsHandler::cancel)
-                .delete("/api/v1/replay/jobs/{id}",        jobsHandler::cancel);
+                .delete("/api/v1/replay/jobs/{id}",        jobsHandler::cancel)
+                .get("/api/v1/replay/jobs/{id}/status",    jobsHandler::status)
+                .get("/api/v1/replay/jobs/{id}/metrics",   jobsHandler::metrics);
 
         http.start();
 

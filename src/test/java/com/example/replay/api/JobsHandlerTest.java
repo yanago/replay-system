@@ -6,6 +6,7 @@ import com.example.replay.actors.StubWorkPlanner;
 import com.example.replay.datalake.StubDataLakeReader;
 import com.example.replay.downstream.StubDownstreamClient;
 import com.example.replay.kafka.StubEventPublisher;
+import com.example.replay.metrics.MetricsRegistry;
 import com.example.replay.rest.MinimalHttpServer;
 import com.example.replay.storage.InMemoryJobRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -34,14 +35,15 @@ class JobsHandlerTest {
 
     @BeforeAll
     static void setUp() throws Exception {
-        var repo = new InMemoryJobRepository();
+        var repo     = new InMemoryJobRepository();
+        var registry = new MetricsRegistry();
         // 200 batches × 20 ms delay = ~4 s total — enough time for pause/resume/cancel
         // HTTP calls to land while the job is still RUNNING.
         system = ActorSystem.create(
                 JobManager.create(repo, new StubDataLakeReader(200, 5, 20L), new StubWorkPlanner(1), 1,
-                        new StubEventPublisher(), new StubDownstreamClient()),
+                        new StubEventPublisher(), new StubDownstreamClient(), registry),
                 "test-replay");
-        var handler = new JobsHandler(system, repo);
+        var handler = new JobsHandler(system, repo, registry);
 
         server = new MinimalHttpServer(0)           // OS picks a free port
                 .post("/api/v1/replay/jobs",               handler::create)
@@ -51,7 +53,9 @@ class JobsHandlerTest {
                 .post("/api/v1/replay/jobs/{id}/pause",    handler::pause)
                 .post("/api/v1/replay/jobs/{id}/resume",   handler::resume)
                 .post("/api/v1/replay/jobs/{id}/cancel",   handler::cancel)
-                .delete("/api/v1/replay/jobs/{id}",        handler::cancel);
+                .delete("/api/v1/replay/jobs/{id}",        handler::cancel)
+                .get("/api/v1/replay/jobs/{id}/status",    handler::status)
+                .get("/api/v1/replay/jobs/{id}/metrics",   handler::metrics);
         server.start();
         port = server.boundPort();
 

@@ -5,6 +5,7 @@ import com.example.replay.actors.Messages.CoordinatorResponse;
 import com.example.replay.datalake.DataLakeReader;
 import com.example.replay.downstream.DownstreamClient;
 import com.example.replay.kafka.EventPublisher;
+import com.example.replay.metrics.MetricsRegistry;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.model.ReplayStatus;
 import com.example.replay.storage.ReplayJobRepository;
@@ -46,6 +47,7 @@ public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
     private final int                                              numWorkers;
     private final EventPublisher                                   publisher;
     private final DownstreamClient                                 downstreamClient;
+    private final MetricsRegistry                                  registry;
     private final Map<String, ActorRef<Messages.ReplayJobCommand>> workers = new HashMap<>();
 
     // -----------------------------------------------------------------------
@@ -58,9 +60,10 @@ public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
             WorkPlannerFn planner,
             int numWorkers,
             EventPublisher publisher,
-            DownstreamClient downstreamClient) {
+            DownstreamClient downstreamClient,
+            MetricsRegistry registry) {
         return Behaviors.setup(ctx ->
-                new JobManager(ctx, repo, dataLakeReader, planner, numWorkers, publisher, downstreamClient));
+                new JobManager(ctx, repo, dataLakeReader, planner, numWorkers, publisher, downstreamClient, registry));
     }
 
     private JobManager(ActorContext<CoordinatorCommand> ctx,
@@ -69,7 +72,8 @@ public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
                        WorkPlannerFn planner,
                        int numWorkers,
                        EventPublisher publisher,
-                       DownstreamClient downstreamClient) {
+                       DownstreamClient downstreamClient,
+                       MetricsRegistry registry) {
         super(ctx);
         this.repo             = repo;
         this.dataLakeReader   = dataLakeReader;
@@ -77,6 +81,7 @@ public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
         this.numWorkers       = numWorkers;
         this.publisher        = publisher;
         this.downstreamClient = downstreamClient;
+        this.registry         = registry;
     }
 
     // -----------------------------------------------------------------------
@@ -129,7 +134,7 @@ public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
 
         var workerRef = getContext().spawn(
                 ReplayJobActor.create(running, repo, getContext().getSelf(), dataLakeReader, planner,
-                        numWorkers, publisher, downstreamClient),
+                        numWorkers, publisher, downstreamClient, registry),
                 "replay-job-" + running.jobId());
         workers.put(running.jobId(), workerRef);
         workerRef.tell(new Messages.ReplayJobCommand.Start());

@@ -5,6 +5,7 @@ import com.example.replay.actors.Messages.CoordinatorResponse;
 import com.example.replay.datalake.StubDataLakeReader;
 import com.example.replay.downstream.StubDownstreamClient;
 import com.example.replay.kafka.StubEventPublisher;
+import com.example.replay.metrics.MetricsRegistry;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.model.ReplayStatus;
 import com.example.replay.storage.InMemoryJobRepository;
@@ -34,7 +35,7 @@ class JobManagerTest {
     void setUp() {
         repo    = new InMemoryJobRepository();
         manager = testKit.spawn(JobManager.create(repo, new StubDataLakeReader(3, 5), new StubWorkPlanner(1), 1,
-                new StubEventPublisher(), new StubDownstreamClient()));
+                new StubEventPublisher(), new StubDownstreamClient(), new MetricsRegistry()));
         probe   = testKit.createTestProbe();
     }
 

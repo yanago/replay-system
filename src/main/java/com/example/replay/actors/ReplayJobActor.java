@@ -3,6 +3,7 @@ package com.example.replay.actors;
 import com.example.replay.datalake.DataLakeReader;
 import com.example.replay.downstream.DownstreamClient;
 import com.example.replay.kafka.EventPublisher;
+import com.example.replay.metrics.MetricsRegistry;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.storage.ReplayJobRepository;
 import org.apache.pekko.actor.typed.ActorRef;
@@ -64,6 +65,7 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
     private final int                                   numWorkers;
     private final EventPublisher                        publisher;
     private final DownstreamClient                      downstreamClient;
+    private final MetricsRegistry                       registry;
 
     private ActorRef<Messages.WorkerPoolCommand> workerPool;
 
@@ -82,10 +84,11 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
             WorkPlannerFn planner,
             int numWorkers,
             EventPublisher publisher,
-            DownstreamClient downstreamClient) {
+            DownstreamClient downstreamClient,
+            MetricsRegistry registry) {
         return Behaviors.setup(ctx ->
                 new ReplayJobActor(ctx, job, repo, coordinator, dataLakeReader, planner, numWorkers,
-                        publisher, downstreamClient));
+                        publisher, downstreamClient, registry));
     }
 
     private ReplayJobActor(ActorContext<Messages.ReplayJobCommand> ctx,
@@ -96,7 +99,8 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
                             WorkPlannerFn planner,
                             int numWorkers,
                             EventPublisher publisher,
-                            DownstreamClient downstreamClient) {
+                            DownstreamClient downstreamClient,
+                            MetricsRegistry registry) {
         super(ctx);
         this.job              = job;
         this.repo             = repo;
@@ -106,6 +110,7 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
         this.numWorkers       = numWorkers;
         this.publisher        = publisher;
         this.downstreamClient = downstreamClient;
+        this.registry         = registry;
     }
 
     // -----------------------------------------------------------------------
@@ -210,9 +215,11 @@ public final class ReplayJobActor extends AbstractBehavior<Messages.ReplayJobCom
             return Behaviors.stopped();
         }
 
+        registry.registerJob(job.jobId(), packets.size());
+
         workerPool = getContext().spawn(
                 WorkerPoolActor.create(packets, dataLakeReader, publisher, job.targetTopic(),
-                        downstreamClient, getContext().getSelf(), numWorkers),
+                        downstreamClient, getContext().getSelf(), numWorkers, job.jobId(), registry),
                 "pool-" + job.jobId());
         workerPool.tell(new Messages.WorkerPoolCommand.Start());
 
