@@ -7,8 +7,11 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -118,5 +121,75 @@ class KafkaEventPublisherTest {
 
         assertEquals(0, result);
         assertTrue(mock.history().isEmpty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Skewed customer distribution — correct cid keys under Zipf load
+    // -----------------------------------------------------------------------
+
+    @Test
+    void publish_skewedBatch_whaleCustomerKeysCorrect() throws Exception {
+        var mock      = new MockProducer<>(true, new StringSerializer(), new StringSerializer());
+        var publisher = publisherWith(mock);
+
+        // 20 events: 16 from "whale", 4 from distinct light customers
+        var events = new ArrayList<SecurityEvent>(20);
+        for (int i = 0; i < 16; i++) events.add(event("ew-" + i, "whale"));
+        for (int i = 0; i < 4;  i++) events.add(event("el-" + i, "light-" + i));
+
+        int sent = publisher.publish("output", events).get();
+        assertEquals(20, sent);
+
+        var records    = mock.history();
+        long whaleKeys = records.stream().filter(r -> "whale".equals(r.key())).count();
+        assertEquals(16, whaleKeys, "Expected 16 whale keys");
+
+        Set<String> lightKeys = records.stream()
+                .map(ProducerRecord::key)
+                .filter(k -> k.startsWith("light-"))
+                .collect(Collectors.toSet());
+        assertEquals(4, lightKeys.size(), "Expected 4 distinct light keys");
+
+        // No record should use eventId as key
+        records.forEach(r -> assertFalse(
+                r.key().startsWith("ew-") || r.key().startsWith("el-"),
+                "eventId used as partition key: " + r.key()));
+    }
+
+    @Test
+    void publish_allRecordsSentToCorrectTopic() throws Exception {
+        var mock      = new MockProducer<>(true, new StringSerializer(), new StringSerializer());
+        var publisher = publisherWith(mock);
+
+        publisher.publish("target-topic",
+                List.of(event("e1", "c1"), event("e2", "c2"), event("e3", "c3"))).get();
+
+        mock.history().forEach(r ->
+                assertEquals("target-topic", r.topic(), "Wrong topic: " + r.topic()));
+    }
+
+    @Test
+    void publish_largeBatch_allCidsUsedAsKeys() throws Exception {
+        var mock      = new MockProducer<>(true, new StringSerializer(), new StringSerializer());
+        var publisher = publisherWith(mock);
+
+        // 50 events across 5 customers (10 each)
+        var events = new ArrayList<SecurityEvent>(50);
+        for (int c = 0; c < 5; c++) {
+            for (int i = 0; i < 10; i++) {
+                events.add(event("evt-%d-%d".formatted(c, i), "cust-%02d".formatted(c)));
+            }
+        }
+
+        int sent = publisher.publish("t", events).get();
+        assertEquals(50, sent);
+
+        var records = mock.history();
+        assertEquals(50, records.size());
+        for (int i = 0; i < 50; i++) {
+            String expectedCid = events.get(i).cid();
+            assertEquals(expectedCid, records.get(i).key(),
+                    "Key mismatch at index " + i);
+        }
     }
 }
