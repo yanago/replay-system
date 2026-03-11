@@ -2,6 +2,7 @@ package com.example.replay.actors;
 
 import com.example.replay.actors.Messages.CoordinatorCommand;
 import com.example.replay.actors.Messages.CoordinatorResponse;
+import com.example.replay.datalake.DataLakeReader;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.model.ReplayStatus;
 import com.example.replay.storage.ReplayJobRepository;
@@ -37,20 +38,34 @@ import java.util.Map;
  */
 public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
 
-    private final ReplayJobRepository                           repo;
+    private final ReplayJobRepository                              repo;
+    private final DataLakeReader                                   dataLakeReader;
+    private final WorkPlannerFn                                    planner;
+    private final int                                              numWorkers;
     private final Map<String, ActorRef<Messages.ReplayJobCommand>> workers = new HashMap<>();
 
     // -----------------------------------------------------------------------
     // Factory
     // -----------------------------------------------------------------------
 
-    public static Behavior<CoordinatorCommand> create(ReplayJobRepository repo) {
-        return Behaviors.setup(ctx -> new JobManager(ctx, repo));
+    public static Behavior<CoordinatorCommand> create(
+            ReplayJobRepository repo,
+            DataLakeReader dataLakeReader,
+            WorkPlannerFn planner,
+            int numWorkers) {
+        return Behaviors.setup(ctx -> new JobManager(ctx, repo, dataLakeReader, planner, numWorkers));
     }
 
-    private JobManager(ActorContext<CoordinatorCommand> ctx, ReplayJobRepository repo) {
+    private JobManager(ActorContext<CoordinatorCommand> ctx,
+                       ReplayJobRepository repo,
+                       DataLakeReader dataLakeReader,
+                       WorkPlannerFn planner,
+                       int numWorkers) {
         super(ctx);
-        this.repo = repo;
+        this.repo           = repo;
+        this.dataLakeReader = dataLakeReader;
+        this.planner        = planner;
+        this.numWorkers     = numWorkers;
     }
 
     // -----------------------------------------------------------------------
@@ -102,7 +117,7 @@ public final class JobManager extends AbstractBehavior<CoordinatorCommand> {
         repo.update(running);
 
         var workerRef = getContext().spawn(
-                ReplayJobActor.create(running, repo, getContext().getSelf()),
+                ReplayJobActor.create(running, repo, getContext().getSelf(), dataLakeReader, planner, numWorkers),
                 "replay-job-" + running.jobId());
         workers.put(running.jobId(), workerRef);
         workerRef.tell(new Messages.ReplayJobCommand.Start());

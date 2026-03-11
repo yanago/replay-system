@@ -2,6 +2,8 @@ package com.example.replay.api;
 
 import com.example.replay.actors.JobManager;
 import com.example.replay.actors.Messages;
+import com.example.replay.actors.StubWorkPlanner;
+import com.example.replay.datalake.StubDataLakeReader;
 import com.example.replay.rest.MinimalHttpServer;
 import com.example.replay.storage.InMemoryJobRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -31,7 +33,11 @@ class JobsHandlerTest {
     @BeforeAll
     static void setUp() throws Exception {
         var repo = new InMemoryJobRepository();
-        system = ActorSystem.create(JobManager.create(repo), "test-replay");
+        // 200 batches × 20 ms delay = ~4 s total — enough time for pause/resume/cancel
+        // HTTP calls to land while the job is still RUNNING.
+        system = ActorSystem.create(
+                JobManager.create(repo, new StubDataLakeReader(200, 5, 20L), new StubWorkPlanner(1), 1),
+                "test-replay");
         var handler = new JobsHandler(system, repo);
 
         server = new MinimalHttpServer(0)           // OS picks a free port
