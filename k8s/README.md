@@ -101,11 +101,11 @@ curl -sf "$BASE_URL/health" | jq .
 JOB=$(curl -sf -X POST "$BASE_URL/api/v1/replay/jobs" \
   -H 'Content-Type: application/json' \
   -d '{
-    "source_table":    "security_events",
-    "start_time":      "2024-01-01T00:00:00Z",
-    "end_time":        "2024-01-02T00:00:00Z",
-    "speed_multiplier": 1.0,
-    "target_endpoint": "http://httpbin.org/post"
+    "source_table":     "security_events",
+    "target_topic":     "replay-output",
+    "from_time":        "2024-01-01T00:00:00Z",
+    "to_time":          "2024-01-02T00:00:00Z",
+    "speed_multiplier": 1.0
   }')
 JOB_ID=$(echo "$JOB" | jq -r '.id')
 echo "Created job: $JOB_ID"

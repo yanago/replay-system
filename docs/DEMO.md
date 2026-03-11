@@ -50,10 +50,10 @@ JOB=$(curl -s -X POST $BASE_URL/api/v1/replay/jobs \
   -H 'Content-Type: application/json' \
   -d '{
     "source_table":     "security_events",
-    "start_time":       "2024-01-01T00:00:00Z",
-    "end_time":         "2024-01-02T00:00:00Z",
-    "speed_multiplier": 1.0,
-    "target_endpoint":  "http://httpbin.org/post"
+    "target_topic":     "replay-output",
+    "from_time":        "2024-01-01T00:00:00Z",
+    "to_time":          "2024-01-02T00:00:00Z",
+    "speed_multiplier": 1.0
   }')
 echo $JOB | jq .
 export JOB_ID=$(echo $JOB | jq -r '.id')
@@ -134,10 +134,10 @@ JOB2=$(curl -s -X POST $BASE_URL/api/v1/replay/jobs \
   -H 'Content-Type: application/json' \
   -d '{
     "source_table":     "security_events",
-    "start_time":       "2024-01-01T00:00:00Z",
-    "end_time":         "2024-01-31T00:00:00Z",
-    "speed_multiplier": 1.0,
-    "target_endpoint":  "http://httpbin.org/post"
+    "target_topic":     "replay-output",
+    "from_time":        "2024-01-01T00:00:00Z",
+    "to_time":          "2024-01-31T00:00:00Z",
+    "speed_multiplier": 1.0
   }')
 JOB2_ID=$(echo $JOB2 | jq -r '.id')
 
@@ -156,10 +156,10 @@ for i in 1 2 3; do
     -H 'Content-Type: application/json' \
     -d "{
       \"source_table\":     \"security_events\",
-      \"start_time\":       \"2024-0${i}-01T00:00:00Z\",
-      \"end_time\":         \"2024-0${i}-02T00:00:00Z\",
-      \"speed_multiplier\": 5.0,
-      \"target_endpoint\":  \"http://httpbin.org/post\"
+      \"target_topic\":     \"replay-output\",
+      \"from_time\":        \"2024-0${i}-01T00:00:00Z\",
+      \"to_time\":          \"2024-0${i}-02T00:00:00Z\",
+      \"speed_multiplier\": 5.0
     }" | jq -r '.id'
 done
 

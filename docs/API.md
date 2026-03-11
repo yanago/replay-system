@@ -27,20 +27,20 @@ Create and start a new replay job.
 ```json
 {
   "source_table":     "security_events",
-  "start_time":       "2024-01-01T00:00:00Z",
-  "end_time":         "2024-01-02T00:00:00Z",
-  "speed_multiplier": 2.0,
-  "target_endpoint":  "http://downstream.example.com/ingest"
+  "target_topic":     "replay-output",
+  "from_time":        "2024-01-01T00:00:00Z",
+  "to_time":          "2024-01-02T00:00:00Z",
+  "speed_multiplier": 2.0
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `source_table` | string | yes | Iceberg table name |
-| `start_time` | ISO-8601 UTC | yes | Replay window start (inclusive) |
-| `end_time` | ISO-8601 UTC | yes | Replay window end (exclusive) |
-| `speed_multiplier` | float > 0 | yes | `1.0` = real-time, `2.0` = 2× speed |
-| `target_endpoint` | URL | yes | Downstream REST endpoint for events |
+| `target_topic` | string | yes | Kafka topic name (`[a-zA-Z0-9._-]`, max 249 chars) |
+| `from_time` | ISO-8601 UTC | yes | Replay window start (inclusive) |
+| `to_time` | ISO-8601 UTC | yes | Replay window end (exclusive) |
+| `speed_multiplier` | float > 0 | no | `1.0` = real-time, `2.0` = 2× speed; defaults to `1.0` |
 
 **Response `201 Created`**
 ```json
@@ -48,10 +48,10 @@ Create and start a new replay job.
   "id":               "b3d1e2f4-...",
   "status":           "PENDING",
   "source_table":     "security_events",
-  "start_time":       "2024-01-01T00:00:00Z",
-  "end_time":         "2024-01-02T00:00:00Z",
+  "target_topic":     "replay-output",
+  "from_time":        "2024-01-01T00:00:00Z",
+  "to_time":          "2024-01-02T00:00:00Z",
   "speed_multiplier": 2.0,
-  "target_endpoint":  "http://downstream.example.com/ingest",
   "created_at":       "2024-03-11T10:00:00Z"
 }
 ```

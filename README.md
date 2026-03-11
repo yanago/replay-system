@@ -59,10 +59,10 @@ curl -X POST $BASE_URL/api/v1/replay/jobs \
   -H 'Content-Type: application/json' \
   -d '{
     "source_table":     "security_events",
-    "start_time":       "2024-01-01T00:00:00Z",
-    "end_time":         "2024-01-02T00:00:00Z",
-    "speed_multiplier": 1.0,
-    "target_endpoint":  "http://your-service/ingest"
+    "target_topic":     "replay-output",
+    "from_time":        "2024-01-01T00:00:00Z",
+    "to_time":          "2024-01-02T00:00:00Z",
+    "speed_multiplier": 1.0
   }'
 
 # Monitor
@@ -182,6 +182,7 @@ docker build -t replay-system:latest .
 
 ## Documentation
 
+- [`docs/DESIGN.md`](docs/DESIGN.md) — system design document (architecture, API, data strategy, trade-offs)
 - [`docs/API.md`](docs/API.md) — complete API reference
 - [`docs/DEMO.md`](docs/DEMO.md) — 20-minute live demo script
 - [`k8s/README.md`](k8s/README.md) — Kubernetes setup, smoke tests, teardown
