@@ -2,7 +2,10 @@ package com.example.replay;
 
 import com.example.replay.actors.JobManager;
 import com.example.replay.actors.Messages;
+import com.example.replay.actors.WorkPlanner;
 import com.example.replay.api.JobsHandler;
+import com.example.replay.datalake.IcebergDataLakeReader;
+import org.apache.hadoop.conf.Configuration;
 import com.example.replay.rest.HttpResponse;
 import com.example.replay.rest.MinimalHttpServer;
 import com.example.replay.storage.DatabaseConfig;
@@ -50,9 +53,21 @@ public final class ReplayApplication {
             log.warn("Storage backend: in-memory (data will not survive restart — set POSTGRES_URL for persistence)");
         }
 
+        // --- Data lake reader & work planner -----------------------------------
+        var dataLakeReader = new IcebergDataLakeReader();
+
+        // Number of parallel workers per job: cap at 4 to avoid overwhelming
+        // the Iceberg reader on a single-node demo deployment.
+        int numWorkers = Math.min(4, Runtime.getRuntime().availableProcessors());
+        var hadoopConf  = new Configuration();
+        var planner     = (com.example.replay.actors.WorkPlannerFn)
+                (loc, from, to) -> WorkPlanner.plan(loc, from, to, hadoopConf, numWorkers);
+
+        log.info("Work distribution: {} parallel workers per job", numWorkers);
+
         // --- Pekko actor system ------------------------------------------------
         ActorSystem<Messages.CoordinatorCommand> system =
-                ActorSystem.create(JobManager.create(repo), "replay-system");
+                ActorSystem.create(JobManager.create(repo, dataLakeReader, planner, numWorkers), "replay-system");
 
         // --- Route handlers ----------------------------------------------------
         var jobsHandler = new JobsHandler(system, repo);

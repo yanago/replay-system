@@ -1,74 +1,85 @@
 package com.example.replay.actors;
 
+import com.example.replay.datalake.DataLakeReader;
 import com.example.replay.model.ReplayJob;
-import com.example.replay.model.SecurityEvent;
 import org.apache.pekko.actor.typed.ActorRef;
 import org.apache.pekko.actor.typed.Behavior;
 import org.apache.pekko.actor.typed.javadsl.AbstractBehavior;
 import org.apache.pekko.actor.typed.javadsl.ActorContext;
 import org.apache.pekko.actor.typed.javadsl.Behaviors;
 import org.apache.pekko.actor.typed.javadsl.Receive;
-import org.apache.pekko.actor.typed.javadsl.TimerScheduler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * Reads event batches from the data lake and delivers them to the parent
  * {@link ReplayJobActor}.
  *
- * <p><strong>Stub implementation</strong> — {@link #fetchNextBatch()} generates
- * synthetic {@link SecurityEvent}s at a fixed rate. Replace it with a real
- * {@code IcebergDataLakeReader.readBatch(job, offset)} call when integrating.
+ * <p>Each batch is fetched asynchronously via
+ * {@code CompletableFuture.supplyAsync(reader::readBatch, IO_EXECUTOR)} and
+ * piped back to this actor as {@link Messages.DataReaderCommand.BatchReady}.
+ * The actor never blocks its dispatcher thread.
  *
  * <p>State machine:
  * <pre>
- *   IDLE ──Start──→ READING (periodic FetchBatch timer started)
- *   READING ──FetchBatch──→ send BatchRead to parent, reschedule
- *   READING ──FetchBatch (last)──→ send ReaderDone to parent → stopped
- *   READING ──Pause──→ PAUSED  (timer cancelled)
- *   PAUSED  ──Resume──→ READING (timer restarted)
- *   any ──Cancel──→ stopped
+ *   IDLE     ──Start──────────────→ dispatch fetch → FETCHING
+ *   FETCHING ──BatchReady (ok)────→ tell parent BatchRead; dispatch next → FETCHING
+ *   FETCHING ──BatchReady (empty)─→ tell parent ReaderDone → stopped
+ *   FETCHING ──BatchReady (error)─→ tell parent BatchFailed → stopped
+ *   FETCHING ──Pause──────────────→ set pauseRequested=true, stay in FETCHING
+ *   FETCHING ──Cancel─────────────→ stopped
+ *   PAUSED   ──Resume─────────────→ dispatch fetch → FETCHING
+ *   PAUSED   ──Cancel─────────────→ stopped
  * </pre>
+ *
+ * <p>Note: when Cancel arrives while a fetch is in-flight, the actor stops
+ * immediately.  The in-flight {@code CompletableFuture} may still complete, but
+ * its {@code BatchReady} result will be dead-lettered (actor already stopped).
  */
 public final class DataReaderActor extends AbstractBehavior<Messages.DataReaderCommand> {
 
-    /** Synthetic events per batch. */
-    private static final int      BATCH_SIZE     = 10;
-    /** Delay between consecutive batch fetches. */
-    private static final Duration FETCH_INTERVAL = Duration.ofMillis(200);
-    /** Total synthetic batches before signalling done. Swap for real cursor logic. */
-    private static final int      MAX_BATCHES    = 5;
-    /** Stable key used to cancel/restart the periodic fetch timer. */
-    private static final Object   TIMER_KEY      = "fetch";
+    /** Events requested per batch from the data lake. */
+    static final int BATCH_SIZE = 500;
 
-    private final ActorRef<Messages.ReplayJobCommand>        parent;
-    private final ReplayJob                                  job;
-    private final TimerScheduler<Messages.DataReaderCommand> timers;
+    /**
+     * Dedicated virtual-thread executor for blocking Iceberg / Parquet I/O.
+     * Virtual threads are cheap; one per batch call is fine.
+     */
+    private static final Executor IO_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
-    private long batchSeq = 0;
+    private static final Logger log = LoggerFactory.getLogger(DataReaderActor.class);
+
+    private final ActorRef<Messages.ReplayJobCommand> parent;
+    private final ReplayJob                           job;
+    private final DataLakeReader                      reader;
+
+    private int     batchIndex     = 0;
+    private long    batchSeq       = 0;
+    private boolean pauseRequested = false;
 
     // -----------------------------------------------------------------------
     // Factory
     // -----------------------------------------------------------------------
 
     public static Behavior<Messages.DataReaderCommand> create(
-            ActorRef<Messages.ReplayJobCommand> parent, ReplayJob job) {
-        return Behaviors.withTimers(timers ->
-                Behaviors.setup(ctx -> new DataReaderActor(ctx, timers, parent, job)));
+            ActorRef<Messages.ReplayJobCommand> parent,
+            ReplayJob job,
+            DataLakeReader reader) {
+        return Behaviors.setup(ctx -> new DataReaderActor(ctx, parent, job, reader));
     }
 
     private DataReaderActor(ActorContext<Messages.DataReaderCommand> ctx,
-                             TimerScheduler<Messages.DataReaderCommand> timers,
                              ActorRef<Messages.ReplayJobCommand> parent,
-                             ReplayJob job) {
+                             ReplayJob job,
+                             DataLakeReader reader) {
         super(ctx);
-        this.timers = timers;
         this.parent = parent;
         this.job    = job;
+        this.reader = reader;
     }
 
     // -----------------------------------------------------------------------
@@ -87,14 +98,17 @@ public final class DataReaderActor extends AbstractBehavior<Messages.DataReaderC
                 .build();
     }
 
-    private Receive<Messages.DataReaderCommand> reading() {
+    /** In-flight I/O; only BatchReady, Pause, and Cancel are meaningful. */
+    private Receive<Messages.DataReaderCommand> fetching() {
         return newReceiveBuilder()
-                .onMessage(Messages.DataReaderCommand.FetchBatch.class, this::onFetch)
-                .onMessage(Messages.DataReaderCommand.Pause.class,      this::onPause)
-                .onMessage(Messages.DataReaderCommand.Cancel.class,     this::onCancel)
+                .onMessage(Messages.DataReaderCommand.BatchReady.class, this::onBatchReady)
+                .onMessage(Messages.DataReaderCommand.Pause.class,
+                        msg -> { pauseRequested = true; return fetching(); })
+                .onMessage(Messages.DataReaderCommand.Cancel.class, this::onCancel)
                 .build();
     }
 
+    /** No I/O in-flight; waiting for Resume or Cancel. */
     private Receive<Messages.DataReaderCommand> waitingResume() {
         return newReceiveBuilder()
                 .onMessage(Messages.DataReaderCommand.Resume.class, this::onResume)
@@ -107,64 +121,60 @@ public final class DataReaderActor extends AbstractBehavior<Messages.DataReaderC
     // -----------------------------------------------------------------------
 
     private Behavior<Messages.DataReaderCommand> onStart(Messages.DataReaderCommand.Start msg) {
-        scheduleFetch();
-        getContext().getLog().debug("DataReaderActor started for job {}", job.jobId());
-        return reading();
+        log.debug("DataReaderActor started for job {}", job.jobId());
+        dispatchFetch();
+        return fetching();
     }
 
-    private Behavior<Messages.DataReaderCommand> onFetch(Messages.DataReaderCommand.FetchBatch msg) {
-        if (batchSeq >= MAX_BATCHES) {
-            parent.tell(new Messages.ReplayJobCommand.ReaderDone(batchSeq));
-            getContext().getLog().debug("DataReaderActor done — job {} sent {} batches",
-                    job.jobId(), batchSeq);
+    private Behavior<Messages.DataReaderCommand> onBatchReady(Messages.DataReaderCommand.BatchReady msg) {
+        if (msg.error() != null) {
+            log.error("Batch read failed for job {}: {}", job.jobId(), msg.error().getMessage());
+            parent.tell(new Messages.ReplayJobCommand.BatchFailed(msg.seq(), msg.error().getMessage()));
             return Behaviors.stopped();
         }
-        parent.tell(new Messages.ReplayJobCommand.BatchRead(fetchNextBatch(), batchSeq++));
-        scheduleFetch();
-        return reading();
-    }
+        if (msg.events().isEmpty()) {
+            log.debug("DataReaderActor done — job {} sent {} batches", job.jobId(), batchSeq);
+            parent.tell(new Messages.ReplayJobCommand.ReaderDone(batchSeq));
+            return Behaviors.stopped();
+        }
 
-    private Behavior<Messages.DataReaderCommand> onPause(Messages.DataReaderCommand.Pause msg) {
-        timers.cancel(TIMER_KEY);
-        getContext().getLog().debug("DataReaderActor paused at batch {} for job {}", batchSeq, job.jobId());
-        return waitingResume();
+        parent.tell(new Messages.ReplayJobCommand.BatchRead(msg.events(), msg.seq()));
+        batchIndex++;
+        batchSeq++;
+
+        if (pauseRequested) {
+            pauseRequested = false;
+            log.debug("DataReaderActor paused at batchIndex={} for job {}", batchIndex, job.jobId());
+            return waitingResume();
+        }
+
+        dispatchFetch();
+        return fetching();
     }
 
     private Behavior<Messages.DataReaderCommand> onResume(Messages.DataReaderCommand.Resume msg) {
-        scheduleFetch();
-        getContext().getLog().debug("DataReaderActor resumed for job {}", job.jobId());
-        return reading();
+        log.debug("DataReaderActor resuming from batchIndex={} for job {}", batchIndex, job.jobId());
+        dispatchFetch();
+        return fetching();
     }
 
     private Behavior<Messages.DataReaderCommand> onCancel(Messages.DataReaderCommand.Cancel msg) {
-        timers.cancelAll();
-        getContext().getLog().debug("DataReaderActor cancelled for job {}", job.jobId());
+        log.debug("DataReaderActor cancelled for job {}", job.jobId());
         return Behaviors.stopped();
     }
 
     // -----------------------------------------------------------------------
-    // Helpers
+    // Helper
     // -----------------------------------------------------------------------
 
-    private void scheduleFetch() {
-        timers.startSingleTimer(TIMER_KEY, new Messages.DataReaderCommand.FetchBatch(), FETCH_INTERVAL);
-    }
-
-    /**
-     * Generates a synthetic batch of events.
-     * Replace with {@code IcebergDataLakeReader.readBatch(job, batchSeq)}.
-     */
-    private List<SecurityEvent> fetchNextBatch() {
-        var events = new ArrayList<SecurityEvent>(BATCH_SIZE);
-        for (int i = 0; i < BATCH_SIZE; i++) {
-            events.add(new SecurityEvent(
-                    "evt-b%d-i%d".formatted(batchSeq, i),
-                    job.sourceTable(),
-                    Instant.now(),
-                    Instant.now(),
-                    "SECURITY_EVENT",
-                    null, null, null, Map.of()));
-        }
-        return events;
+    private void dispatchFetch() {
+        int  idx = batchIndex;
+        long seq = batchSeq;
+        getContext().pipeToSelf(
+                CompletableFuture.supplyAsync(
+                        () -> reader.readBatch(
+                                job.sourceTable(), job.fromTime(), job.toTime(), idx, BATCH_SIZE),
+                        IO_EXECUTOR),
+                (events, err) -> new Messages.DataReaderCommand.BatchReady(events, seq, err));
     }
 }

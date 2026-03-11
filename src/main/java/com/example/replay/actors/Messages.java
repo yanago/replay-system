@@ -107,11 +107,11 @@ public final class Messages {
     /**
      * Commands for {@link ReplayJobActor}.
      *
-     * <p>Lifecycle flow:
+     * <p>Lifecycle flow (work-distribution path):
      * <pre>
-     *   Start → (RUNNING) → Pause → (PAUSED) → Resume → (RUNNING) → ...
-     *   BatchRead / BatchEmitted / BatchFailed / ReaderDone are internal signals
-     *   between DataReaderActor → ReplayJobActor → DataEmitterActor.
+     *   Start → async planning → PlanReady → WorkerPoolActor dispatches packets
+     *   PoolFinished / PoolFailed ← WorkerPoolActor (terminal signals)
+     *   Pause / Resume → forwarded to WorkerPoolActor
      * </pre>
      */
     public sealed interface ReplayJobCommand permits
@@ -122,22 +122,32 @@ public final class Messages {
             ReplayJobCommand.BatchRead,
             ReplayJobCommand.BatchEmitted,
             ReplayJobCommand.BatchFailed,
-            ReplayJobCommand.ReaderDone {
+            ReplayJobCommand.ReaderDone,
+            ReplayJobCommand.PlanReady,
+            ReplayJobCommand.PoolFinished,
+            ReplayJobCommand.PoolFailed {
 
-        /** Triggers the IDLE → RUNNING transition; spawns reader and emitter. */
+        /** Triggers the IDLE → planning transition. */
         record Start()                                                   implements ReplayJobCommand {}
         record Pause()                                                   implements ReplayJobCommand {}
         record Resume()                                                  implements ReplayJobCommand {}
         record Cancel()                                                  implements ReplayJobCommand {}
 
-        /** Internal: DataReaderActor delivers a batch. */
+        /** Internal: DataReaderActor delivers a batch (legacy path). */
         record BatchRead(List<SecurityEvent> events, long seq)           implements ReplayJobCommand {}
-        /** Internal: DataEmitterActor confirms a batch was published. */
+        /** Internal: DataEmitterActor confirms a batch was published (legacy). */
         record BatchEmitted(long seq, long count)                        implements ReplayJobCommand {}
-        /** Internal: DataEmitterActor reports a publish failure. */
+        /** Internal: DataEmitterActor reports a publish failure (legacy). */
         record BatchFailed(long seq, String reason)                      implements ReplayJobCommand {}
-        /** Internal: DataReaderActor signals no more data. */
+        /** Internal: DataReaderActor signals no more data (legacy). */
         record ReaderDone(long totalBatches)                             implements ReplayJobCommand {}
+
+        /** Internal: async {@link WorkPlannerFn} result piped back to the actor. */
+        record PlanReady(List<WorkPacket> packets, Throwable error)      implements ReplayJobCommand {}
+        /** Internal: {@link WorkerPoolActor} signals all packets were processed. */
+        record PoolFinished(long totalEvents)                            implements ReplayJobCommand {}
+        /** Internal: {@link WorkerPoolActor} signals an unrecoverable failure. */
+        record PoolFailed(String reason)                                 implements ReplayJobCommand {}
     }
 
     // =========================================================================
@@ -146,21 +156,28 @@ public final class Messages {
 
     /**
      * Commands for {@link DataReaderActor}.
-     * {@code FetchBatch} is an internal timer tick — do not send from outside the actor.
+     * {@code BatchReady} is an internal signal — piped back to the actor via
+     * {@code pipeToSelf} after an async {@code DataLakeReader.readBatch} call.
      */
     public sealed interface DataReaderCommand permits
             DataReaderCommand.Start,
             DataReaderCommand.Pause,
             DataReaderCommand.Resume,
             DataReaderCommand.Cancel,
-            DataReaderCommand.FetchBatch {
+            DataReaderCommand.BatchReady {
 
-        record Start()      implements DataReaderCommand {}
-        record Pause()      implements DataReaderCommand {}
-        record Resume()     implements DataReaderCommand {}
-        record Cancel()     implements DataReaderCommand {}
-        /** Internal timer message — scheduled by the actor itself. */
-        record FetchBatch() implements DataReaderCommand {}
+        record Start()   implements DataReaderCommand {}
+        record Pause()   implements DataReaderCommand {}
+        record Resume()  implements DataReaderCommand {}
+        record Cancel()  implements DataReaderCommand {}
+
+        /**
+         * Internal: result of an async {@code readBatch} call piped back to the actor.
+         * Exactly one of {@code events} (non-null, possibly empty) or {@code error}
+         * (non-null) will be set.
+         */
+        record BatchReady(java.util.List<SecurityEvent> events, long seq, Throwable error)
+                implements DataReaderCommand {}
     }
 
     // =========================================================================
@@ -174,6 +191,66 @@ public final class Messages {
 
         record Emit(List<SecurityEvent> events, long seq) implements DataEmitterCommand {}
         record Cancel()                                   implements DataEmitterCommand {}
+    }
+
+    // =========================================================================
+    // WorkerPoolActor protocol
+    // =========================================================================
+
+    /**
+     * Commands for {@link WorkerPoolActor}.
+     *
+     * <p>{@code PacketDone} and {@code PacketFailed} carry the sender's
+     * {@code ActorRef} so the pool knows which worker slot is now free.
+     */
+    public sealed interface WorkerPoolCommand permits
+            WorkerPoolCommand.Start,
+            WorkerPoolCommand.PacketDone,
+            WorkerPoolCommand.PacketFailed,
+            WorkerPoolCommand.Pause,
+            WorkerPoolCommand.Resume,
+            WorkerPoolCommand.Cancel {
+
+        record Start()   implements WorkerPoolCommand {}
+        record Pause()   implements WorkerPoolCommand {}
+        record Resume()  implements WorkerPoolCommand {}
+        record Cancel()  implements WorkerPoolCommand {}
+
+        record PacketDone(String packetId, long eventsEmitted,
+                          org.apache.pekko.actor.typed.ActorRef<Messages.PacketWorkerCommand> workerRef)
+                implements WorkerPoolCommand {}
+
+        record PacketFailed(String packetId, String reason,
+                            org.apache.pekko.actor.typed.ActorRef<Messages.PacketWorkerCommand> workerRef)
+                implements WorkerPoolCommand {}
+    }
+
+    // =========================================================================
+    // PacketWorkerActor protocol
+    // =========================================================================
+
+    /**
+     * Commands for {@link PacketWorkerActor}.
+     *
+     * <p>{@code BatchReady} is an internal pipeToSelf signal carrying the result
+     * of an async {@code DataLakeReader.readBatch} call.
+     */
+    public sealed interface PacketWorkerCommand permits
+            PacketWorkerCommand.Assign,
+            PacketWorkerCommand.BatchReady,
+            PacketWorkerCommand.Pause,
+            PacketWorkerCommand.Resume,
+            PacketWorkerCommand.Cancel {
+
+        /** Assigns a work packet to this worker; triggers reading immediately. */
+        record Assign(WorkPacket packet)  implements PacketWorkerCommand {}
+        record Pause()                    implements PacketWorkerCommand {}
+        record Resume()                   implements PacketWorkerCommand {}
+        record Cancel()                   implements PacketWorkerCommand {}
+
+        /** Internal pipeToSelf result. {@code events} is null when {@code error} is set. */
+        record BatchReady(List<SecurityEvent> events, int batchIndex, Throwable error)
+                implements PacketWorkerCommand {}
     }
 
     // =========================================================================

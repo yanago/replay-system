@@ -1,6 +1,7 @@
 package com.example.replay.actors;
 
 import com.example.replay.actors.Messages.CoordinatorCommand;
+import com.example.replay.datalake.StubDataLakeReader;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.model.ReplayStatus;
 import com.example.replay.storage.InMemoryJobRepository;
@@ -18,12 +19,13 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for {@link ReplayJobActor} state machine transitions.
  *
- * <p>Strategy: spawn a real {@code ReplayJobActor} backed by a test
- * {@link InMemoryJobRepository}; observe coordinator messages via a probe;
- * assert repo state matches expected lifecycle.
+ * <p>Strategy: spawn a real {@code ReplayJobActor} backed by a
+ * {@link InMemoryJobRepository} and a {@link StubDataLakeReader};
+ * observe coordinator messages via a probe; assert repo state matches
+ * expected lifecycle.
  *
- * <p>The stub {@link DataReaderActor} fires 5 batches × 10 events (200 ms apart),
- * so completion tests use a generous timeout.
+ * <p>The stub reader returns 5 batches × 10 events synchronously on a
+ * virtual thread, so tests complete quickly.
  */
 class ReplayJobActorTest {
 
@@ -52,7 +54,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef()), "actor-complete-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-complete-1");
         actor.tell(new Messages.ReplayJobCommand.Start());
 
         // Wait for WorkerFinished (5 batches × 200ms = ~1s)
@@ -75,7 +77,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef()), "actor-pause-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-pause-1");
         actor.tell(new Messages.ReplayJobCommand.Start());
         actor.tell(new Messages.ReplayJobCommand.Pause());
 
@@ -98,7 +100,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef()), "actor-pr-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-pr-1");
         actor.tell(new Messages.ReplayJobCommand.Start());
         actor.tell(new Messages.ReplayJobCommand.Pause());
         actor.tell(new Messages.ReplayJobCommand.Resume());
@@ -121,7 +123,7 @@ class ReplayJobActorTest {
         var job        = job("cancel-before-start");
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef()), "actor-cancel-bs");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-cancel-bs");
         actor.tell(new Messages.ReplayJobCommand.Cancel());
 
         // No WorkerFinished or WorkerFailed expected
@@ -136,16 +138,15 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef()), "actor-cancel-r-1");
-        // Send Cancel immediately after Start — the DataReaderActor timer (200ms)
-        // won't have fired yet, so no batches are in flight and the coordinator
-        // receives no messages at all.
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-cancel-r-1");
+        // Start dispatches an async readBatch, but Cancel is enqueued immediately
+        // after Start. The actor processes Cancel before the BatchReady result
+        // arrives (actor message ordering), stops cleanly, and the coordinator
+        // never receives WorkerFinished or WorkerFailed.
         actor.tell(new Messages.ReplayJobCommand.Start());
         actor.tell(new Messages.ReplayJobCommand.Cancel());
 
-        // DataReaderActor timer fires after 200ms; cancel is delivered in < 10ms,
-        // so no batches are ever read and no coordinator message should arrive.
-        coordProbe.expectNoMessage(Duration.ofMillis(150));
+        coordProbe.expectNoMessage(Duration.ofMillis(300));
     }
 
     // -----------------------------------------------------------------------
@@ -160,7 +161,7 @@ class ReplayJobActorTest {
         repo.save(job.withStatus(ReplayStatus.RUNNING));
 
         var actor = testKit.spawn(
-                ReplayJobActor.create(job, repo, coordProbe.getRef()), "actor-progress-1");
+                ReplayJobActor.create(job, repo, coordProbe.getRef(), new StubDataLakeReader(5, 10), new StubWorkPlanner(1), 1), "actor-progress-1");
         actor.tell(new Messages.ReplayJobCommand.Start());
 
         // Wait for completion
