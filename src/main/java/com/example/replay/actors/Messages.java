@@ -256,8 +256,10 @@ public final class Messages {
         /**
          * Internal pipeToSelf result after Kafka publish + downstream HTTP POST complete.
          * {@code eventsPublished} is 0 and {@code error} is non-null on failure.
+         * {@code fetchMs} carries the data-lake read latency measured in the preceding
+         * {@code BatchReady} handler so the registry can record both latencies together.
          */
-        record BatchPublished(int eventsPublished, int batchIndex, Throwable error)
+        record BatchPublished(int eventsPublished, int batchIndex, long fetchMs, Throwable error)
                 implements PacketWorkerCommand {}
     }
 

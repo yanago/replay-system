@@ -4,6 +4,7 @@ import com.example.replay.actors.Messages.ReplayJobCommand;
 import com.example.replay.datalake.StubDataLakeReader;
 import com.example.replay.downstream.StubDownstreamClient;
 import com.example.replay.kafka.StubEventPublisher;
+import com.example.replay.metrics.MetricsRegistry;
 import com.example.replay.storage.InMemoryJobRepository;
 import org.apache.pekko.actor.testkit.typed.javadsl.ActorTestKit;
 import org.apache.pekko.actor.testkit.typed.javadsl.FishingOutcomes;
@@ -60,7 +61,7 @@ class WorkerPoolActorTest {
         var packets = List.of(packet("loc-1", 3));
 
         var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
-                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1));
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1, "test-job", new MetricsRegistry()));
         pool.tell(new Messages.WorkerPoolCommand.Start());
 
         var msg = probe.receiveMessage(WAIT);
@@ -83,7 +84,7 @@ class WorkerPoolActorTest {
                 packet("loc-c", 2));
 
         var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
-                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2));
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2, "test-job", new MetricsRegistry()));
         pool.tell(new Messages.WorkerPoolCommand.Start());
 
         var msg = probe.receiveMessage(WAIT);
@@ -102,7 +103,7 @@ class WorkerPoolActorTest {
         var reader = new StubDataLakeReader(3, 10);
 
         var pool = testKit.spawn(WorkerPoolActor.create(List.of(), reader,
-                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2));
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2, "test-job", new MetricsRegistry()));
         pool.tell(new Messages.WorkerPoolCommand.Start());
 
         var msg = probe.receiveMessage(WAIT);
@@ -121,7 +122,7 @@ class WorkerPoolActorTest {
         var packets = List.of(packet("loc-pr", 5));
 
         var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
-                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1));
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1, "test-job", new MetricsRegistry()));
         pool.tell(new Messages.WorkerPoolCommand.Start());
         pool.tell(new Messages.WorkerPoolCommand.Pause());
         pool.tell(new Messages.WorkerPoolCommand.Resume());
@@ -144,7 +145,7 @@ class WorkerPoolActorTest {
         var packets = List.of(packet("loc-cancel", 100));
 
         var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
-                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1));
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 1, "test-job", new MetricsRegistry()));
         pool.tell(new Messages.WorkerPoolCommand.Start());
         pool.tell(new Messages.WorkerPoolCommand.Cancel());
 
@@ -171,7 +172,7 @@ class WorkerPoolActorTest {
                         Instant.EPOCH.plusSeconds(3600), 40L,  256L,  0.0, 1));
 
         var pool = testKit.spawn(WorkerPoolActor.create(packets, reader,
-                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2));
+                new StubEventPublisher(), "test-topic", new StubDownstreamClient(), probe.getRef(), 2, "test-job", new MetricsRegistry()));
         pool.tell(new Messages.WorkerPoolCommand.Start());
 
         var msg = probe.receiveMessage(WAIT);
@@ -219,7 +220,8 @@ class WorkerPoolActorTest {
                 new StubWorkPlanner(2),    // 2 packets
                 2,                         // 2 workers
                 new StubEventPublisher(),
-                new StubDownstreamClient()));
+                new StubDownstreamClient(),
+                new MetricsRegistry()));
 
         actor.tell(new Messages.ReplayJobCommand.Start());
 

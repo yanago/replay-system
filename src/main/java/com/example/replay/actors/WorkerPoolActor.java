@@ -3,6 +3,7 @@ package com.example.replay.actors;
 import com.example.replay.datalake.DataLakeReader;
 import com.example.replay.downstream.DownstreamClient;
 import com.example.replay.kafka.EventPublisher;
+import com.example.replay.metrics.MetricsRegistry;
 import org.apache.pekko.actor.typed.ActorRef;
 import org.apache.pekko.actor.typed.Behavior;
 import org.apache.pekko.actor.typed.javadsl.AbstractBehavior;
@@ -54,6 +55,8 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
     private final DownstreamClient                        downstreamClient;
     private final int                                     numWorkers;
     private final ActorRef<Messages.ReplayJobCommand>     parent;
+    private final String                                  jobId;
+    private final MetricsRegistry                         registry;
 
     /** Packets not yet dispatched, ordered as delivered by WorkPlanner. */
     private final Deque<WorkPacket> pending;
@@ -76,9 +79,12 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
             String targetTopic,
             DownstreamClient downstreamClient,
             ActorRef<Messages.ReplayJobCommand> parent,
-            int numWorkers) {
+            int numWorkers,
+            String jobId,
+            MetricsRegistry registry) {
         return Behaviors.setup(ctx ->
-                new WorkerPoolActor(ctx, packets, reader, publisher, targetTopic, downstreamClient, parent, numWorkers));
+                new WorkerPoolActor(ctx, packets, reader, publisher, targetTopic, downstreamClient,
+                        parent, numWorkers, jobId, registry));
     }
 
     private WorkerPoolActor(ActorContext<Messages.WorkerPoolCommand> ctx,
@@ -88,7 +94,9 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
                              String targetTopic,
                              DownstreamClient downstreamClient,
                              ActorRef<Messages.ReplayJobCommand> parent,
-                             int numWorkers) {
+                             int numWorkers,
+                             String jobId,
+                             MetricsRegistry registry) {
         super(ctx);
         this.reader           = reader;
         this.publisher        = publisher;
@@ -98,6 +106,8 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
         this.parent           = parent;
         this.pending          = new ArrayDeque<>(packets);
         this.totalPackets     = packets.size();
+        this.jobId            = jobId;
+        this.registry         = registry;
     }
 
     // -----------------------------------------------------------------------
@@ -152,6 +162,7 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
         totalEventsEmitted += msg.eventsEmitted();
         completedPackets++;
         active.remove(msg.workerRef());
+        registry.recordPacketDone(jobId);
 
         log.debug("Packet {} done ({} events). Progress: {}/{}",
                 msg.packetId().substring(0, 8), msg.eventsEmitted(), completedPackets, totalPackets);
@@ -170,6 +181,7 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
         totalEventsEmitted += msg.eventsEmitted();
         completedPackets++;
         active.remove(msg.workerRef());
+        registry.recordPacketDone(jobId);
 
         log.debug("Packet {} drained while paused. Progress: {}/{}", msg.packetId().substring(0, 8), completedPackets, totalPackets);
 
@@ -225,7 +237,8 @@ public final class WorkerPoolActor extends AbstractBehavior<Messages.WorkerPoolC
         while (!pending.isEmpty() && active.size() < numWorkers) {
             WorkPacket packet = pending.poll();
             var worker = getContext().spawn(
-                    PacketWorkerActor.create(reader, publisher, targetTopic, downstreamClient, getContext().getSelf()),
+                    PacketWorkerActor.create(reader, publisher, targetTopic, downstreamClient,
+                            getContext().getSelf(), jobId, registry),
                     "pworker-" + packet.packetId().substring(0, 8));
             active.put(worker, packet);
             worker.tell(new Messages.PacketWorkerCommand.Assign(packet));

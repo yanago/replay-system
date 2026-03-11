@@ -1,6 +1,8 @@
 package com.example.replay.api;
 
 import com.example.replay.actors.Messages;
+import com.example.replay.metrics.MetricsRegistry;
+import com.example.replay.model.JobMetrics;
 import com.example.replay.model.ReplayJob;
 import com.example.replay.rest.HttpRequest;
 import com.example.replay.rest.HttpResponse;
@@ -42,11 +44,14 @@ public final class JobsHandler {
 
     private final ActorSystem<Messages.CoordinatorCommand> system;
     private final ReplayJobRepository                      repo;
+    private final MetricsRegistry                          registry;
 
     public JobsHandler(ActorSystem<Messages.CoordinatorCommand> system,
-                       ReplayJobRepository repo) {
-        this.system = system;
-        this.repo   = repo;
+                       ReplayJobRepository repo,
+                       MetricsRegistry registry) {
+        this.system   = system;
+        this.repo     = repo;
+        this.registry = registry;
     }
 
     // -----------------------------------------------------------------------
@@ -238,6 +243,51 @@ public final class JobsHandler {
     public HttpResponse cancel(HttpRequest req) {
         return lifecycle(req, replyTo ->
                 new Messages.CoordinatorCommand.CancelJob(req.pathParam("id"), replyTo));
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /api/v1/replay/jobs/{id}/status
+    // -----------------------------------------------------------------------
+
+    /**
+     * Returns live progress and timing for a replay job.
+     *
+     * <p>Responses:
+     * <ul>
+     *   <li>{@code 200 OK} — {@link com.example.replay.model.JobStatus} as JSON</li>
+     *   <li>{@code 404 Not Found} — unknown job ID</li>
+     * </ul>
+     */
+    public HttpResponse status(HttpRequest req) {
+        var id = req.pathParam("id");
+        return repo.findById(id)
+                .map(job -> HttpResponse.ok(JsonUtils.toJson(registry.buildStatus(job))))
+                .orElse(HttpResponse.notFound("/api/v1/replay/jobs/" + id + "/status"));
+    }
+
+    // -----------------------------------------------------------------------
+    // GET /api/v1/replay/jobs/{id}/metrics
+    // -----------------------------------------------------------------------
+
+    /**
+     * Returns live throughput and latency metrics for a replay job.
+     *
+     * <p>Returns an empty snapshot for jobs that have not yet started running
+     * (PENDING or pre-planning state).
+     *
+     * <p>Responses:
+     * <ul>
+     *   <li>{@code 200 OK} — {@link JobMetrics} as JSON</li>
+     *   <li>{@code 404 Not Found} — unknown job ID</li>
+     * </ul>
+     */
+    public HttpResponse metrics(HttpRequest req) {
+        var id = req.pathParam("id");
+        if (repo.findById(id).isEmpty()) {
+            return HttpResponse.notFound("/api/v1/replay/jobs/" + id + "/metrics");
+        }
+        JobMetrics metrics = registry.getMetrics(id).orElse(JobMetrics.empty(id));
+        return HttpResponse.ok(JsonUtils.toJson(metrics));
     }
 
     // -----------------------------------------------------------------------
