@@ -1,0 +1,82 @@
+digraph ReplaySystem {
+    graph [
+        rankdir=TB
+        fontname="Helvetica"
+        fontsize=13
+        splines=ortho
+        nodesep=0.7
+        ranksep=0.9
+        bgcolor="#FAFAFA"
+        label="Replay System — Architecture"
+        labelloc=t
+        labelfontsize=16
+        labelfontname="Helvetica-Bold"
+        pad=0.5
+    ]
+    node [fontname="Helvetica" fontsize=11 style=filled shape=box]
+    edge [fontname="Helvetica" fontsize=10 color="#555555"]
+
+    // ── External clients ───────────────────────────────────────────────────
+    subgraph cluster_clients {
+        label="Clients"
+        style=dashed color="#AAAAAA"
+        client [label="REST Client\n(curl / app)" fillcolor="#E8F4FD" color="#3498DB"]
+    }
+
+    // ── HTTP Layer ─────────────────────────────────────────────────────────
+    subgraph cluster_api {
+        label="HTTP API  :8080"
+        style=filled fillcolor="#EBF5FB" color="#2E86C1"
+        routes  [label="ReplayRoutes\n(MinimalHttpServer)" fillcolor="#D6EAF8" color="#2E86C1"]
+        handler [label="JobsHandler"                       fillcolor="#D6EAF8" color="#2E86C1"]
+    }
+
+    // ── Actor System ───────────────────────────────────────────────────────
+    subgraph cluster_actors {
+        label="Apache Pekko Actor System"
+        style=filled fillcolor="#F9F3FF" color="#7D3C98"
+
+        jobmgr  [label="JobManager\n(guardian)"    fillcolor="#E8DAEF" color="#7D3C98"]
+        jobact  [label="ReplayJobActor\n(per job)" fillcolor="#E8DAEF" color="#7D3C98"]
+        pool    [label="WorkerPoolActor"            fillcolor="#E8DAEF" color="#7D3C98"]
+        worker  [label="PacketWorkerActor × N\n(per work-packet)" fillcolor="#E8DAEF" color="#7D3C98" shape=box3d]
+    }
+
+    // ── Data plane ─────────────────────────────────────────────────────────
+    subgraph cluster_data {
+        label="Data Plane"
+        style=filled fillcolor="#EAFAF1" color="#1E8449"
+        iceberg [label="Apache Iceberg\nData Lake"              fillcolor="#D5F5E3" color="#1E8449"]
+        kafka   [label="Kafka\n(customer-keyed partitions)"     fillcolor="#D5F5E3" color="#1E8449"]
+        ds      [label="Downstream REST\n(target_endpoint)"     fillcolor="#D5F5E3" color="#1E8449"]
+    }
+
+    // ── Storage ────────────────────────────────────────────────────────────
+    subgraph cluster_storage {
+        label="Storage"
+        style=filled fillcolor="#FEF9E7" color="#B7950B"
+        repo    [label="JobRepository\n(Postgres / in-memory)"  fillcolor="#FDEBD0" color="#B7950B"]
+        metrics [label="MetricsRegistry\n(in-memory, lock-free)" fillcolor="#FDEBD0" color="#B7950B"]
+    }
+
+    // ── Edges ──────────────────────────────────────────────────────────────
+    client  -> routes  [label="POST /jobs\nGET /jobs/{id}/*"]
+    routes  -> handler [label="dispatch"]
+    handler -> jobmgr  [label="tell(CreateJob)\nask(Pause/Resume/Cancel)"]
+    handler -> repo    [label="findById / list"]
+    handler -> metrics [label="buildStatus / getMetrics"]
+
+    jobmgr  -> jobact  [label="spawn per job"]
+    jobact  -> pool    [label="spawn pool"]
+    pool    -> worker  [label="spawn N workers\n+ assign WorkPackets"]
+
+    worker  -> iceberg [label="read batches\n(DataLakeReader)"]
+    worker  -> kafka   [label="publish events\n(cid partition key)"]
+    worker  -> ds      [label="POST events\n(DownstreamClient)"]
+    worker  -> metrics [label="recordBatch /\nrecordPacketDone"]
+
+    jobact  -> repo    [label="update status\n(PENDING→RUNNING→COMPLETED)"]
+
+    // ── Kafka partitioning note ────────────────────────────────────────────
+    kafka   [label="Kafka\npartition key = customer_id\n(handles Zipf skew)"]
+}
