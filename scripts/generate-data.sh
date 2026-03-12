@@ -34,7 +34,8 @@ echo "==> Using JAR: $JAR"
 # 2. Generate the data
 # ---------------------------------------------------------------------------
 echo "==> Generating data to: $DATA_DIR"
-java -cp "$JAR" com.example.replay.tools.DataGenerator "$DATA_DIR"
+java --add-opens java.base/javax.security.auth=ALL-UNNAMED \
+     -cp "$JAR" com.example.replay.tools.DataGenerator "$DATA_DIR"
 
 echo ""
 echo "==> Done!  Table location: $DATA_DIR"

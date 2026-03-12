@@ -69,7 +69,7 @@ public final class DataGenerator {
     private static final int    TOTAL_EVENTS     = 55_000;  // > 50k
     private static final int    WRITE_BATCH_SIZE = 5_000;   // events per Parquet file
 
-    private static final LocalDate START_DATE = LocalDate.of(2024, 1, 1);
+    private static final LocalDate START_DATE = LocalDate.of(2026, 1, 1);
     private static final int       NUM_DAYS   = 30;
 
     private static final String[] EVENT_TYPES = {

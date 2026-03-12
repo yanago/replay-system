@@ -18,5 +18,5 @@ data:
   # Iceberg data lake — path inside the shared data PVC
   ICEBERG_WAREHOUSE_URI: "/data/iceberg-warehouse"
 
-  # Optional downstream REST endpoint; omit to use the simulated client
-  # DOWNSTREAM_URL: "http://downstream-service/events"
+  # Slow sink for pause/resume testing — 2s delay per batch
+  DOWNSTREAM_URL: "http://slow-sink:8888/events"
