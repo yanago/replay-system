@@ -10,6 +10,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -96,7 +98,7 @@ public final class IcebergDataLakeReader implements DataLakeReader {
                 str(rec, "event_id"),
                 str(rec, "cid"),
                 fromMicros(rec, "event_timestamp"),
-                fromMicros(rec, "event_time"),
+                microsToMillis(rec, "event_time"),
                 str(rec, "event_type"),
                 str(rec, "source_ip"),
                 str(rec, "target_host"),
@@ -107,7 +109,16 @@ public final class IcebergDataLakeReader implements DataLakeReader {
 
     private static Instant fromMicros(Record rec, String field) {
         Object v = rec.getField(field);
-        return v == null ? Instant.EPOCH : Instant.ofEpochMilli(((Number) v).longValue() / 1_000L);
+        if (v == null) return Instant.EPOCH;
+        if (v instanceof LocalDateTime ldt) return ldt.toInstant(ZoneOffset.UTC);
+        return Instant.ofEpochMilli(((Number) v).longValue() / 1_000L);
+    }
+
+    private static long microsToMillis(Record rec, String field) {
+        Object v = rec.getField(field);
+        if (v == null) return 0L;
+        if (v instanceof LocalDateTime ldt) return ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
+        return ((Number) v).longValue() / 1_000L;
     }
 
     private static String str(Record rec, String field) {

@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class KafkaEventPublisherTest {
 
     private static SecurityEvent event(String eventId, String cid) {
-        return new SecurityEvent(eventId, cid, Instant.now(), Instant.now(),
+        return new SecurityEvent(eventId, cid, Instant.now(), Instant.now().toEpochMilli(),
                 "TEST", "1.2.3.4", "host", "LOW", Map.of());
     }
 

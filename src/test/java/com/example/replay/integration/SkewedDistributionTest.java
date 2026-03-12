@@ -87,7 +87,7 @@ class SkewedDistributionTest {
                         : "light-%02d".formatted(i % 5 + 1);
                 events.add(new SecurityEvent(
                         "evt-b%d-i%d".formatted(idx, i), cid,
-                        Instant.now(), from.plusSeconds((long) idx * 60 + i),
+                        Instant.now(), from.plusSeconds((long) idx * 60 + i).toEpochMilli(),
                         "SKEW_TEST", "10.0.0.1", "host-0", "HIGH", Map.of()));
             }
             return events;

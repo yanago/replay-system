@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class SimulatedDownstreamClientTest {
 
     private static SecurityEvent event(String id, String cid) {
-        return new SecurityEvent(id, cid, Instant.now(), Instant.now(),
+        return new SecurityEvent(id, cid, Instant.now(), Instant.now().toEpochMilli(),
                 "TEST", "1.2.3.4", "host", "LOW", Map.of());
     }
 

@@ -26,7 +26,7 @@ public record SecurityEvent(
         @JsonProperty("event_id")        String              eventId,
         @JsonProperty("cid")             String              cid,
         @JsonProperty("event_timestamp") Instant             eventTimestamp,
-        @JsonProperty("event_time")      Instant             eventTime,
+        @JsonProperty("event_time")      long                eventTime,
         @JsonProperty("event_type")      String              eventType,
         @JsonProperty("source_ip")       String              sourceIp,
         @JsonProperty("target_host")     String              targetHost,
@@ -38,7 +38,6 @@ public record SecurityEvent(
         Objects.requireNonNull(eventId,        "event_id is required");
         Objects.requireNonNull(cid,            "cid is required");
         Objects.requireNonNull(eventTimestamp, "event_timestamp is required");
-        Objects.requireNonNull(eventTime,      "event_time is required");
         Objects.requireNonNull(eventType,      "event_type is required");
         if (sourceIp   == null) sourceIp   = "";
         if (targetHost == null) targetHost = "";

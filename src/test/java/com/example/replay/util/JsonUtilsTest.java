@@ -24,7 +24,7 @@ class JsonUtilsTest {
                 "evt-001",                   // event_id
                 "tenant-42",                 // cid
                 TS,                          // event_timestamp (ingestion time)
-                EVT,                         // event_time      (occurrence time)
+                EVT.toEpochMilli(),          // event_time      (occurrence time, epoch ms)
                 "LOGIN_FAILURE",             // event_type
                 "192.168.1.10",              // source_ip
                 "auth-server-prod",          // target_host
@@ -65,7 +65,7 @@ class JsonUtilsTest {
     @Test
     void securityEvent_nullOptionalFieldsGetDefaults() {
         // sourceIp, targetHost, severity, attributes are optional
-        var event = new SecurityEvent("e1", "cid1", TS, EVT, "PORT_SCAN",
+        var event = new SecurityEvent("e1", "cid1", TS, EVT.toEpochMilli(), "PORT_SCAN",
                 null, null, null, null);
         assertEquals("",        event.sourceIp());
         assertEquals("",        event.targetHost());
@@ -76,15 +76,13 @@ class JsonUtilsTest {
     @Test
     void securityEvent_missingRequiredField_throwsNPE() {
         assertThrows(NullPointerException.class,
-                () -> new SecurityEvent(null, "cid1", TS, EVT, "TYPE", "", "", "LOW", Map.of()));
+                () -> new SecurityEvent(null, "cid1", TS, EVT.toEpochMilli(), "TYPE", "", "", "LOW", Map.of()));
         assertThrows(NullPointerException.class,
-                () -> new SecurityEvent("e1", null, TS, EVT, "TYPE", "", "", "LOW", Map.of()));
+                () -> new SecurityEvent("e1", null, TS, EVT.toEpochMilli(), "TYPE", "", "", "LOW", Map.of()));
         assertThrows(NullPointerException.class,
-                () -> new SecurityEvent("e1", "cid1", null, EVT, "TYPE", "", "", "LOW", Map.of()));
+                () -> new SecurityEvent("e1", "cid1", null, EVT.toEpochMilli(), "TYPE", "", "", "LOW", Map.of()));
         assertThrows(NullPointerException.class,
-                () -> new SecurityEvent("e1", "cid1", TS, null, "TYPE", "", "", "LOW", Map.of()));
-        assertThrows(NullPointerException.class,
-                () -> new SecurityEvent("e1", "cid1", TS, EVT, null, "", "", "LOW", Map.of()));
+                () -> new SecurityEvent("e1", "cid1", TS, EVT.toEpochMilli(), null, "", "", "LOW", Map.of()));
     }
 
     // -----------------------------------------------------------------------
@@ -175,7 +173,7 @@ class JsonUtilsTest {
     @Test
     void fromJsonList_roundTrips() {
         var events = List.of(sampleEvent(),
-                new SecurityEvent("evt-002", "tenant-42", TS, EVT, "PORT_SCAN",
+                new SecurityEvent("evt-002", "tenant-42", TS, EVT.toEpochMilli(), "PORT_SCAN",
                         "10.0.0.1", "firewall", "MEDIUM", Map.of()));
         var json   = JsonUtils.toJson(events);
         var back   = JsonUtils.fromJsonList(json, SecurityEvent.class);

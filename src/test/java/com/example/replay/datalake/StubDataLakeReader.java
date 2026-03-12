@@ -62,7 +62,7 @@ public final class StubDataLakeReader implements DataLakeReader {
                     "evt-b%d-i%d".formatted(batchIndex, i),
                     "cust-%03d".formatted((batchIndex * eventsPerBatch + i) % 10 + 1),
                     Instant.now(),
-                    from.plusSeconds(batchIndex * 60L + i),
+                    from.plusSeconds(batchIndex * 60L + i).toEpochMilli(),
                     "TEST_EVENT",
                     "10.0.0." + (i % 255 + 1),
                     "host-" + i,
