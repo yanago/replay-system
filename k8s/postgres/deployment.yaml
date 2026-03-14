@@ -52,13 +52,13 @@ spec:
               memory: "256Mi"
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "replay"]
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d replay"]
             initialDelaySeconds: 15
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "replay"]
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d replay"]
             initialDelaySeconds: 5
             periodSeconds: 5
           volumeMounts:
